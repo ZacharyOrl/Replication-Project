@@ -100,7 +100,7 @@ cd(indir)
     C_min = 0.0001
     C_max = 1000000 # Maximum consumption allowed
 
-    nc::Int64 = 50 # Number of consumption grid points 
+    nc::Int64 = 20 # Number of consumption grid points 
 
     # Use equally-spaced grids like the paper 
     c_grid::Array{Float64,1} = collect(range(c_min, length = nc, stop = c_max))
@@ -116,14 +116,14 @@ cd(indir)
     D_min = 0.0
     D_max = 0.8*H_max # Start with some value
 
-    nD::Int64 = 10
+    nD::Int64 = 20
     D_grid::Array{Float64,1} = collect(range(D_min, length = nD, stop = D_max))
 
     # Risky Portfolio share grid 
     α_min = 0.0 
     α_max = 1.0 
 
-    nα::Int64 = 10 
+    nα::Int64 = 20 
     α_grid::Array{Float64,1} = collect(range(α_min, length = nα, stop = α_max))
 
     # Cash on hand grid
