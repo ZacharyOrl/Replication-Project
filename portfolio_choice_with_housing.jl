@@ -170,12 +170,20 @@ function Initialize_Model()
     return para, sols 
 end
 
-
 #########################################################
 # Functions 
 #########################################################
 
 function flow_utility_func(c::Float64, H::Float64, para::Model_Parameters)
+    #=
+        Computes Cobb-Douglas Flow Utility 
+ 
+        Args
+        c (Float64): consumption choice
+        H (Float64): Housing choice
+        para (Model_Parameters): parameters that define the model, specifically the utility function
+    =#
+
     @unpack γ, θ = para
     return (   ( c^(1-θ) * H^θ )^( 1 - γ )   ) / (1 - γ)
 end 
@@ -185,20 +193,87 @@ function budget_constraint(X::Float64, H::Float64, para::Model_Parameters)
     return (   ( c^(1-θ) * H^θ )^( 1 - γ )   ) / (1 - γ)
 end 
 
+function compute_bequest_value(V::Array{Float64,5}, para::Model_Parameters)
+    # Given a realized state in T+1 and a , computes the bequest agent's bequest utility.    
+    @unpack_Model_Parameters para 
+
+    # Loop over Housing States 
+    for H_index in 1:nH 
+        H = H_grid[H_index]
+    
+        # Loop over Cash-on-hand states
+        for X_index in 1:nX
+            X = X_grid[X_index]
+    
+            # Loop over aggregate income states
+            for η_index in 1:nη
+                η =  η_grid[η_index]
+
+                P = exp(b * (T+1) + p_grid[η_index])
+    
+                # Agents are forced to sell their house when they die
+                    
+                W = X - δ * H * P +  (1-λ) *  P * H
+
+                V[H_index, X_index, η_index, :, :,] .+= β * ( W^(1-γ) )/(1-γ)  
+            end 
+        end 
+    end 
+
+    return V
+end 
+
+function bilinear_interp(F::Array{Float64, 2}, x1::Vector{Float64}, x2::Vector{Float64})
+    #=
+    Bilinear interpolation for 2D grid with flat extrapolation
+
+    Args
+    F (Array): 2D grid of function values evaluated on grid points
+    x1 (Vector): grid points for first dimension - must be evenly spaced
+    x2 (Vector): grid points for second dimension - must be evenly spaced
+
+    Returns
+    interp (Function): bilinear interpolation function
+    =#
+
+    # need to get range object for Interpolations.jl
+    x1_grid = range(minimum(x1), maximum(x1), length=length(x1))
+    x2_grid = range(minimum(x2), maximum(x2), length=length(x2))
+
+    interp = interpolate(F, BSpline(Linear()))
+    extrap = extrapolate(interp, Interpolations.Flat())
+    return scale(extrap, x1_grid, x2_grid)
+end
 
 function Solve_Problem(para::Model_Parameters, sols::Solutions)
     # Solves the decision problem, outputs results back to the sols structure. 
 
-    @unpack T, TR, nH, nX, nη, np, nc, nD, nα, κ, η_grid, ω_grid, ι_grid, p_grid, c_grid, H_grid, D_grid, α_grid, X_grid, T_η, T_ω, Inv_Move, FC  = para
+    @unpack_Model_Parameters para 
     @unpack val_func, pol_func = sols
 
     V = zeros(T+1, nH, nX, nη, 2, 2) 
     pol = zeros(T+1 , nc, nH, nD, nα, 2)
 
+    # Compute the bequest value of wealth
+    V[T+1,:,:,:,:,:] = compute_bequest_value(V[T+1, :, :, :, :, :], para)
+
     println("Begin solving the model backwards")
     for j in T:-1:TR  # Backward induction
         println("Solving the Retiree's Problem")
         println("Age is ", 75 - 5*j)
+        
+        # Generate interpolation functions
+        interp_functions = Vector{Function}(undef, 5)
+
+        # It seems that my states DO NOT pin down next period's value for my problem...
+        # Specifically, ω and r influence next period's X value
+
+        for η_prime in 1: nη
+            for ω_prime in 1:nω
+                for r_prime in 1:nr # Given some η, ω, r, the fixed entry cost and the moving shock and my choice, I know the states
+
+                    EV[j+1, :, :, η_prime, Inv_Move, IFC] .+= (1+ r_prime)
+                    interp[η_prime   ] = bilinear_interp(V[j+1, :, :, η_prime, Inv_Move, IFC], H_grid, X_grid)
 
         # Loop over Housing States 
         for H_index in 1:nH 
@@ -217,6 +292,7 @@ function Solve_Problem(para::Model_Parameters, sols::Solutions)
 
                         # Loop over whether the agent has already paid their stock market entry cost 
                         for IFC = 0:1 
+                            candidate_max = -Inf  
 
                             # Loop over consumption choices 
                             for c_index in 1:nc 
@@ -236,8 +312,15 @@ function Solve_Problem(para::Model_Parameters, sols::Solutions)
 
                                             # Loop over enter / not enter choices 
                                             for FC in 0:1 
+                                                
+                                                if budget_constraint(c, H_prime, D, α) < budget 
+                                                    val = flow_utility_func(c,H)
+                                                    # Loop over random variables 
+                                                    for η_prime in 1: nη
+                                                        for ω_prime in 1:nω
+                                                            for r_prime in 1:nr 
 
-
+                                                                val += 
 
 
 
