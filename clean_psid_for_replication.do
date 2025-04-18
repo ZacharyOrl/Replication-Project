@@ -35,14 +35,17 @@ local minimimum_times_satisified = 5
 * Additional vars used for sample restrictions: 
 * x11104LL = Oversample identifier (11 = Main Sample, 12 = SEO)
 * d11105 = Relationship to Household Head (Head = 1,Partner = 2, Child = 3, Relative = 4, Non-Relative = 5)
+* 
+* w11103 = Longitudinal Weight
+* x11102 = Household identifier 
 *********************************************
 cd "$indir" 
 
 use pequiv_long.dta,clear 
 
 * Rename variables
-local oldnames x11101LL i11110 i11113 i11104 i11109 i11118 d11102LL d11101 d11104 d11106 x11104LL d11105 d11108
-local newnames person_id indiv_labor_inc post_gov_income asset_income windfall_income taxes  gender age married hh_size oversample_id relationship_head education
+local oldnames x11101LL i11110 i11113 i11104 i11109 i11118 d11102LL d11101 d11104 d11106 x11104LL d11105 d11108 w11103 x11102
+local newnames person_id indiv_labor_inc post_gov_income asset_income windfall_income taxes  gender age married hh_size oversample_id relationship_head education wgt hh_id
 
 local i = 1
 foreach oldvar in `oldnames' {
@@ -51,10 +54,10 @@ foreach oldvar in `oldnames' {
     local ++i
 }
 
-keep person_id year indiv_labor_inc post_gov_income asset_income  taxes windfall_income  gender age married hh_size oversample_id relationship_head education
+keep person_id year indiv_labor_inc post_gov_income asset_income  taxes windfall_income  gender age married hh_size oversample_id relationship_head education wgt hh_id
 
 * Generate labor income measure 
-gen hh_income = post_gov_income + taxes - asset_income - windfall_income
+gen hh_income = post_gov_income + taxes - asset_income
 * Income is reported in nominal dollars, adjust for inflation using annual price index for all urban consumers in US. 
 preserve 
 
@@ -77,6 +80,9 @@ drop if _merge == 2
 drop _merge 
 
 replace hh_income = 100* hh_income/price_level
+
+* Construct the cohort 
+gen cohort = year - age
 
 * Impose sample restrictions 
 keep if inrange(year,1970,1992) // year must be between 1970 and 1992
@@ -117,40 +123,58 @@ bysort age_group person_id(age): egen five_year_hh_income = total(temp)
 
 * Collapse 
 
-collapse (last) five_year_hh_income married hh_size education (first) year, by(age_group person_id)
+collapse (last) five_year_hh_income married hh_size education wgt (first) year cohort hh_id, by(age_group person_id)
 * Partial out deterministic income component 
 gen log_hh_inc = log(five_year_hh_income)
 
 forvalues i = 1/3 {
-	reghdfe log_hh_inc i.age i.married hh_size i.year if education == `i',a(person_id)
-	predict deterministic_component_`i'
+	reghdfe log_hh_inc i.age i.married hh_size if education == `i' [pweight = wgt], a(hh_id)
+	
+	// Extract coefficient estimates and standard errors
+	matrix b_est = e(b)
+	
+	// Create a new coefficient matrix with the reference period included
+	matrix b_plot = J(1, 10, .)
+	
+	forvalues j = 1/10 {
+		matrix b_plot[1,`j'] = exp(b_est[1, `j'] + b_est[1, 14])
+	}
+	
+		// Create the plot
+		coefplot matrix(b_plot),  ///
+		vertical ///
+		mcolor(navy%70) msymbol(circle) ///
+		xtitle("Years after layoff") ///
+		connect(l) lcolor(black) lwidth(medthick) /// Added connecting line
+		ytitle("Earnings" "(1992 $)") ///
+		title("Five-year earnings for Education Group"  "`i'") ///
+		note("Note:") ///
+		legend(off)
 
-	* Age Profile of Predictable Income graph
-	preserve 
-		
-		collapse (mean) deterministic_component_`i', by(age_group)
-		
-		replace deterministic_component = exp(deterministic_component)
-		
-		graph twoway (line det* age, sort lcolor(black) lwidth(thick)), ///
-		ytitle("Log After-Tax Income" "(1992 $)", size(small)) ///
-		xtitle("Age") title("Age Profile of Income") ///
-		xlabel(25(5)75) xscale(range(25 75))
-		
 		 graph export "$outdir_images/age_profile_psid_`i'.png", width(2000) replace
 		 
-		 keep age deterministic_component
-		 
-		 sort age 
-		 
-		 export delimited "$outdir_parameters/life_cycle_income_`i'.csv",replace 
-	restore 
+		 * Export 
+		 preserve 
+			 clear 
+			 matrix b_plot = b_plot'  
+			 svmat b_plot ,names(col)
+			 
+			* Create age group labels
+			gen age_group = ""
+			local start = 25
+			forvalues k = 1/10 {
+				local lower = `start' + (`k' - 1) * 5
+				local upper = `lower' + 5
+				replace age_group = "`lower'-`upper'" if _n == `k'
+			}
+
+			rename r1 age_dummies
+			 
+			 export delimited "$outdir_parameters/life_cycle_income_`i'.csv", replace 
+		 restore
 
 }
 
-
-reghdfe five_year_hh_income i.age i.married i.hh_size if education == 1,a(person_id)
-estimates store lowest_educated
 
 
 
