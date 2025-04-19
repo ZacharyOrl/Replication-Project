@@ -29,7 +29,10 @@ using Parameters
 
 @with_kw struct Model_Parameters
     # Normalize all dollar variables by Z
-    Z = 10000
+    Z = 1
+
+    # Number of gridpoints for random variables 
+    g = 3
 
     # Parameters with type annotations
     # Variance Parameters 
@@ -103,7 +106,7 @@ using Parameters
     # State / Choice Grids 
     c_min::Float64 = 0.0001
     c_max::Float64 = 1000000.0/Z
-    nc::Int64 = 20
+    nc::Int64 = 50
     c_grid::Vector{Float64} = collect(range(c_min, length = nc, stop = c_max))
 
     H_min::Float64 = 0.2
@@ -113,17 +116,17 @@ using Parameters
 
     D_min::Float64 = 0.0
     D_max::Float64 = 0.8*c_max / Z
-    nD::Int64 = 20
+    nD::Int64 = 25
     D_grid::Vector{Float64} = collect(range(D_min, length = nD, stop = D_max))
 
     α_min::Float64 = 0.0
     α_max::Float64 = 1.0
-    nα::Int64 = 20
+    nα::Int64 = 10
     α_grid::Vector{Float64} = collect(range(α_min, length = nα, stop = α_max))
 
     X_min::Float64 = 0.0
     X_max::Float64 = 1000000.0/ Z
-    nX::Int64 = 20
+    nX::Int64 = 50
     X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
 
     Inv_Move_grid::Vector{Int64} = [0, 1]
@@ -247,7 +250,7 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
     println("Solving the Retiree's Problem")
 
     # Compute the bequest value of wealth
-    val_func[T+1,:,:,:,:,:] = compute_bequest_value(val_func[T+1, :, :, :, :, :], para)
+    val_func[T+1, :, :, :, :, :] = compute_bequest_value(val_func[T+1, :, :, :, :, :], para)
 
     println("Begin solving the model backwards")
     for j in T:-1:TR  # Backward induction
@@ -289,21 +292,27 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                             IFC = IFC_grid[IFC_index]
                             candidate_max = -Inf  
 
-                            # Loop over consumption choices 
-                            for c_index in 1:nc 
-                                c = c_grid[c_index]
+                            # If an agent has already paid the stock market entry fee, they won't pay it again. 
+                            if IFC == 1
+                                FC_index = 1
+                                FC = FC_grid[FC_index]
 
-                                # Loop over Housing choices 
-                                for H_prime_index in 1:nH 
-                                    H_prime = H_grid[H_prime_index]
+                                # Loop over consumption choices 
+                                for c_index in 1:nc 
+                                    c = c_grid[c_index]
 
-                                    # Loop over Debt choices 
-                                    for D_index in 1:nD
-                                        D = D_grid[D_index]
+                                    # Loop over Housing choices 
+                                    for H_prime_index in 1:nH 
+                                        H_prime = H_grid[H_prime_index]
 
-                                        # Loop over enter/not enter choices 
-                                        for FC_index in 1:2
-                                            FC = FC_grid[FC_index]
+                                        # Loop over Debt choices 
+                                        for D_index in 1:nD
+                                            D = D_grid[D_index]
+                                        
+                                            # Skip if debt exceeds the collateral constraint. 
+                                            if debt_constraint(D, H, P, para) <= 0
+                                                continue 
+                                            end  
 
                                             S_and_B  =  budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
 
@@ -312,15 +321,8 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                                 continue
                                             end
 
-                                            # Skip if debt exceeds the collateral constraint. 
-                                            if debt_constraint(D, H, P, para) <= 0
-                                                continue 
-                                            end  
-
-                                            # If the person has not paid the entry cost and does not pay the entry cost today 
-                                            # they must invest 0 in stocks. 
-                                            if FC == 0 && IFC == 0 
-                                                α_index = 1 
+                                            # Loop over Risky-share choices
+                                            for α_index in 1:nα 
                                                 α = α_grid[α_index]
 
                                                 # Compute Stock and Bond Positions 
@@ -328,12 +330,13 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                                 B = (1-α) * S_and_B 
 
                                                 val = flow_utility_func(c, H, para)
+
                                                 # Find the continuation value 
                                                 # Loop over random variables 
                                                 for η_prime_index in 1:nη
                                                     η_prime = η_grid[η_prime_index]
 
-                                                    for ι_prime_index in 1:nι 
+                                                    for ι_prime_index in 1:nι  
                                                         ι_prime = ι_grid[ι_prime_index]
 
                                                         R_prime = exp(ι_prime + μ)
@@ -342,71 +345,145 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
 
                                                         # Compute next period's liquid wealth
                                                         X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
-
-                                                        val += (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *                                # Not forced to Move 
+    
+                                                        val += (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
                                                                 interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
-                                                                π     * T_η[η_index, η_prime_index] * T_ι[1, ι_prime_index] *                                # Forced to move
-                                                                interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
-
+                                                                π * T_η[η_index, η_prime_index]   * T_ι[1, ι_prime_index] *
+                                                                interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)         
                                                     end 
                                                 end 
-                                                
                                                 # Update value function
                                                 if val > candidate_max 
-                                                    val_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]    = val
-                                                    
-                                                    c_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = c 
-                                                    H_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = H_prime
-                                                    D_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = D
-                                                    FC_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1] = FC
-                                                    α_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = α
-                                                    
-                                                end 
-                                            # If !(IFC == 0 && FC == 0)
-                                            else 
-                                                # Loop over Risky-share choices
-                                                for α_index in 1:nα 
-                                                    α = α_grid[α_index]
+                                                    val_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]    = val
 
+                                                    c_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = c 
+                                                    H_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = H_prime
+                                                    D_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = D
+                                                    FC_pol_func[j, H_index, X_index, η_index, Inv_Move_index,IFC_index] = FC
+                                                    α_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = α
+                                                end 
+                                            end 
+                                        end 
+                                    end
+                                end 
+                            # They have not already paid the entry fee
+                            else 
+                                # Loop over consumption choices 
+                                for c_index in 1:nc 
+                                    c = c_grid[c_index]
+                                    
+                                    # Loop over Housing choices 
+                                    for H_prime_index in 1:nH 
+                                        H_prime = H_grid[H_prime_index]
+                                    
+                                        # Loop over Debt choices 
+                                        for D_index in 1:nD
+                                            D = D_grid[D_index]
+                                                                            
+                                            # Skip if debt exceeds the collateral constraint. 
+                                            if debt_constraint(D, H, P, para) <= 0
+                                                continue 
+                                            end  
+                                    
+                                            # Loop over enter/not enter choices 
+                                            for FC_index in 1:2
+                                                FC = FC_grid[FC_index]
+                                    
+                                                S_and_B  =  budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
+                                    
+                                                # Skip if implied stock and bond spending must be negative
+                                                if S_and_B <= 0
+                                                    continue
+                                                end
+                                    
+                                                # If the person has not paid the entry cost and does not pay the entry cost today 
+                                                # they must invest 0 in stocks. 
+                                                if FC == 0 && IFC == 0 
+                                                    α_index = 1 
+                                                    α = α_grid[α_index]
+                                    
                                                     # Compute Stock and Bond Positions 
                                                     S = α * S_and_B 
                                                     B = (1-α) * S_and_B 
-
+                                    
                                                     val = flow_utility_func(c, H, para)
-
                                                     # Find the continuation value 
                                                     # Loop over random variables 
                                                     for η_prime_index in 1:nη
                                                         η_prime = η_grid[η_prime_index]
-
-
-                                                        for ι_prime_index in 1:nι  
+                                    
+                                                        for ι_prime_index in 1:nι 
                                                             ι_prime = ι_grid[ι_prime_index]
-
+                                        
                                                             R_prime = exp(ι_prime + μ)
                                                             Y_Prime = exp(κ[j, 2])
                                                             P_Prime = P_bar + exp(b * (j-1) + p_grid[η_prime_index])
-
+                                        
                                                             # Compute next period's liquid wealth
                                                             X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
-
-                                                                
+                                        
+                                                            val += (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *                                # Not forced to Move 
+                                                                    interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
+                                                                    π     * T_η[η_index, η_prime_index] * T_ι[1, ι_prime_index] *                                # Forced to move
+                                                                    interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
+                                                        end 
+                                                    end 
+                                                                                        
+                                                    # Update value function
+                                                    if val > candidate_max 
+                                                        val_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]    = val
+                                    
+                                                        c_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = c 
+                                                        H_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = H_prime
+                                                        D_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = D
+                                                        FC_pol_func[j, H_index, X_index, η_index, Inv_Move_index,IFC_index] = FC
+                                                        α_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = α
+                                                                                            
+                                                    end 
+                                                    # If !(IFC == 0 && FC == 0)
+                                                else 
+                                                # Loop over Risky-share choices
+                                                for α_index in 1:nα 
+                                                    α = α_grid[α_index]
+                                    
+                                                    # Compute Stock and Bond Positions 
+                                                    S = α * S_and_B 
+                                                    B = (1-α) * S_and_B 
+                                    
+                                                    val = flow_utility_func(c, H, para)
+                                    
+                                                    # Find the continuation value 
+                                                    # Loop over random variables 
+                                                    for η_prime_index in 1:nη
+                                                        η_prime = η_grid[η_prime_index]
+                                    
+                                                        for ι_prime_index in 1:nι  
+                                                            ι_prime = ι_grid[ι_prime_index]
+                                    
+                                                            R_prime = exp(ι_prime + μ)
+                                                            Y_Prime = exp(κ[j, 2])
+                                                            P_Prime = P_bar + exp(b * (j-1) + p_grid[η_prime_index])
+                                    
+                                                            # Compute next period's liquid wealth
+                                                            X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
+                                    
+                                                                                                        
                                                             val += (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
-                                                                interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
+                                                                    interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
                                                                     π * T_η[η_index, η_prime_index]   * T_ι[1, ι_prime_index] *
-                                                                interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
-                                                         
+                                                                    interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
+                                                                                                
                                                         end 
                                                     end 
                                                     # Update value function
                                                     if val > candidate_max 
-                                                        val_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]    = val
-
-                                                        c_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = c 
-                                                        H_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = H_prime
-                                                        D_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = D
-                                                        FC_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1] = FC
-                                                        α_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = α
+                                                        val_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]    = val
+                                    
+                                                        c_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = c 
+                                                        H_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = H_prime
+                                                        D_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = D
+                                                        FC_pol_func[j, H_index, X_index, η_index, Inv_Move_index,IFC_index] = FC
+                                                        α_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = α
                                                     end 
                                                 end 
                                             end 
@@ -417,16 +494,15 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                         end 
                     end 
                 end 
-            end 
-        end 
-    end 
-end
+            end # η loop
+        end # X Loop
+    end # H Loop
+end # T loop
 
 function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
     @unpack_Model_Parameters para 
     @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
     println("Solving the Worker's Problem")
-    println("Begin solving the model backwards")
 
     for j in TR -1:-1:1  # Backward induction
         println("Age is ", 25 + 5*j)
@@ -478,6 +554,11 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                     for D_index in 1:nD
                                         D = D_grid[D_index]
 
+                                        # Skip if debt exceeds the collateral constraint. 
+                                        if debt_constraint(D, H, P, para) <= 0
+                                            continue 
+                                        end  
+
                                         # Loop over enter/not enter choices 
                                         for FC_index in 1:2
                                             FC = FC_grid[FC_index]
@@ -488,11 +569,6 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                             if S_and_B <= 0
                                                 continue
                                             end
-
-                                            # Skip if debt exceeds the collateral constraint. 
-                                            if debt_constraint(D, H, P, para) <= 0
-                                                continue 
-                                            end  
 
                                             # If the person has not paid the entry cost and does not pay the entry cost today 
                                             # they must invest 0 in stocks. 
@@ -560,6 +636,7 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
 
                                                         for ω_prime_index in 1:nω
                                                             ω_prime = ω_grid[ω_prime_index]
+
                                                             for ι_prime_index in 1:nι  
                                                                 ι_prime = ι_grid[ι_prime_index]
 
@@ -597,10 +674,10 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                         end 
                     end 
                 end 
-            end 
-        end 
-    end 
-end
+            end # η loop
+        end # X Loop
+    end # H Loop
+end # T loop
 
 para, sols = Initialize_Model()
 Solve_Retiree_Problem(para, sols)
