@@ -4,7 +4,7 @@
 ###########################################
 # Packages 
 ###########################################
-using Parameters, CSV, DelimitedFiles, CSV, Plots,Distributions,LaTeXStrings, Statistics, DataFrames, LinearAlgebra, Optim, Interpolations
+using Parameters, CSV, DelimitedFiles, CSV, Plots,Distributions,LaTeXStrings, Statistics, DataFrames, LinearAlgebra, Optim, Interpolations, Base.Threads
 ###########################################
 indir = "C:/Users/zacha/Documents/Research Ideas/Housing and Portfolio Choice/Replication"
 
@@ -34,6 +34,7 @@ using Parameters
     # Number of gridpoints for random variables 
     g = 3
 
+    # Gridpoints for cash on hand 
 
     # Parameters with type annotations
     # Variance Parameters 
@@ -52,17 +53,17 @@ using Parameters
     F::Float64 = 1000.0 / Z
 
     # Returns / interest rates 
-    R_D::Float64 = 1 + compound(0.04, 5)                  # Mortgage interest rate 
-    R_F::Float64 = 1 + compound(0.02, 5)                  # Risk-free rate
-    R_S::Float64 = 0.1                                # Expected return on stocks 
-    μ::Float64 = compound(log(R_S + 1.0) - σ_η/2, 5)  # Expected log-return on stocks
+    R_D::Float64 =  compound(1 + 0.04, 5)                  # Mortgage interest rate 
+    R_F::Float64 =  compound(1 + 0.02, 5)                  # Risk-free rate
+    R_S::Float64 = 0.1                                     # Expected return on stocks 
+    μ::Float64 = log(compound(1 + 0.1, 5) - σ_η/2)        # Expected log-return on stocks
 
     # Housing parameters
-    d::Float64 = 0.15              # Down-Payment proportion 
-    π::Float64 = 0.244             # Moving shock probability 
-    δ::Float64 = 0.01              # Housing Depreciation
-    λ::Float64 = 0.08              # House-sale cost 
-    b::Float64 = compound(0.01, 5) # Real house price growth over 5 years  - matching the way it is presented in the paper 
+    d::Float64 = 0.15                               # Down-Payment proportion 
+    π::Float64 = compound(1 + 0.03, 5) - 1          # Moving shock probability 
+    δ::Float64 = compound(1 + 0.01, 5) - 1          # Housing Depreciation
+    λ::Float64 = 0.08                               # House-sale cost 
+    b::Float64 = 5 * 0.01                           # Real log house price growth over 5 years  - matching the way it is presented in the paper 
 
     # Utility function parameters
     θ::Float64 = 0.1              # Utility from housing services relative to consumption
@@ -75,7 +76,7 @@ using Parameters
 
     # Grids & Transition Matrices
     # Persistent Earnings
-    η_grid::Vector{Float64} = rouwenhorst(σ_η, φ, 3)[1] .- log(Z) # Normalize labor income by 1000 so need to subtract log(1000) from log-process. 
+    η_grid::Vector{Float64} = rouwenhorst(σ_η, φ, 3)[1] .- log(Z) # Normalize labor income by Z so need to subtract log(Z) from the log-process. 
     T_η::Matrix{Float64} = rouwenhorst(σ_η, φ, 3)[2]
     nη::Int64 = length(η_grid)
 
@@ -105,34 +106,36 @@ using Parameters
     np::Int64 = nη
 
     # State / Choice Grids 
+    X_min::Float64 = 0.0
+    X_max::Float64 = 1000000.0/ Z
+    nX::Int64 = 100
+    X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
+
     c_min::Float64 = 0.0001
-    c_max::Float64 = 10000000.0/Z
-    nc::Int64 = 50
+    c_max::Float64 = X_max
+    nc::Int64 = 100
     c_grid::Vector{Float64} = collect(range(c_min, length = nc, stop = c_max))
 
     H_min::Float64 = 0.2
-    H_max::Float64 = 15.0
+    H_max::Float64 = 10.0
     nH::Int64 = 10
     H_grid::Vector{Float64} = collect(range(H_min, length = nH, stop = H_max))
 
     D_min::Float64 = 0.0
-    D_max::Float64 = 0.8*c_max / Z
-    nD::Int64 = 25
+    D_max::Float64 = X_max
+    nD::Int64 = 50
     D_grid::Vector{Float64} = collect(range(D_min, length = nD, stop = D_max))
 
     α_min::Float64 = 0.0
     α_max::Float64 = 1.0
-    nα::Int64 = 10
+    nα::Int64 = 5
     α_grid::Vector{Float64} = collect(range(α_min, length = nα, stop = α_max))
 
-    X_min::Float64 = 0.0
-    X_max::Float64 = 1000000.0/ Z
-    nX::Int64 = 50
-    X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
-
     Inv_Move_grid::Vector{Int64} = [0, 1]
-    FC_grid::Vector{Int64} = [0, 1]
-    IFC_grid::Vector{Int64} = [0, 1]
+
+    FC_grid::Vector{Int64}       = [0, 1]
+
+    IFC_grid::Vector{Int64}      = [0, 1]
 end
 #initialize value function and policy functions
 mutable struct Solutions
@@ -186,7 +189,7 @@ function budget_constraint(X::Float64, H::Float64, P::Float64, Inv_Move::Int64, 
     @unpack δ, F, λ = para
 
     # If there is no house trade
-    if Inv_Move == 1
+    if Inv_Move == 0
         S_and_B = X - c - FC*F - δ * P * H + D
     # If there is a house trade 
     else 
@@ -272,17 +275,17 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
         end 
 
         # Loop over Housing States 
-        for H_index in 1:nH 
-            H = H_grid[H_index]
+        Threads.@threads for X_index in 1:nX
+            X = X_grid[X_index]
 
             # Loop over Cash-on-hand states
-            for X_index in 1:nX
-                X = X_grid[X_index]
+            for H_index in 1:nH
+                H = H_grid[H_index]
 
                 # Loop over aggregate income states
                 for η_index in 1:nη
                     η = η_grid[η_index]
-                    P = P_bar + exp(b * (j-1) + p_grid[η_index])
+                    P = P_bar * exp(b * (j-1) + p_grid[η_index])
 
                     # Loop over whether the agent was forced to move 
                     for Inv_Move_index in 1:2
@@ -298,24 +301,24 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                 FC_index = 1
                                 FC = FC_grid[FC_index]
 
-                                # Loop over consumption choices 
-                                for c_index in 1:nc 
-                                    c = c_grid[c_index]
+                                # Loop over Debt choices 
+                                for D_index in 1:nD
+                                    D = D_grid[D_index]
 
                                     # Loop over Housing choices 
                                     for H_prime_index in 1:nH 
                                         H_prime = H_grid[H_prime_index]
+                                    
+                                        # Skip if debt exceeds the collateral constraint. 
+                                        if debt_constraint(D, H_prime, P, para) <= 0
+                                            continue 
+                                        end  
 
-                                        # Loop over Debt choices 
-                                        for D_index in 1:nD
-                                            D = D_grid[D_index]
-                                        
-                                            # Skip if debt exceeds the collateral constraint. 
-                                            if debt_constraint(D, H, P, para) <= 0
-                                                continue 
-                                            end  
+                                        # Loop over consumption choices 
+                                        for c_index in 1:nc 
+                                            c = c_grid[c_index]
 
-                                            S_and_B  =  budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
+                                            S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
 
                                             # Skip if implied stock and bond spending must be negative
                                             if S_and_B <= 0
@@ -335,14 +338,12 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                                 # Find the continuation value 
                                                 # Loop over random variables 
                                                 for η_prime_index in 1:nη
-                                                    η_prime = η_grid[η_prime_index]
 
                                                     for ι_prime_index in 1:nι  
                                                         ι_prime = ι_grid[ι_prime_index]
 
                                                         R_prime = exp(ι_prime + μ)
-                                                        Y_Prime = exp(κ[j, 2])
-                                                        P_Prime = P_bar + exp(b * (j-1) + p_grid[η_prime_index])
+                                                        Y_Prime = κ[j, 2]
 
                                                         # Compute next period's liquid wealth
                                                         X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
@@ -369,22 +370,23 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                 end 
                             # They have not already paid the entry fee
                             else 
-                                # Loop over consumption choices 
-                                for c_index in 1:nc 
-                                    c = c_grid[c_index]
-                                    
+
+                                # Loop over Debt choices 
+                                for D_index in 1:nD
+                                    D = D_grid[D_index]
+
                                     # Loop over Housing choices 
                                     for H_prime_index in 1:nH 
                                         H_prime = H_grid[H_prime_index]
-                                    
-                                        # Loop over Debt choices 
-                                        for D_index in 1:nD
-                                            D = D_grid[D_index]
                                                                             
-                                            # Skip if debt exceeds the collateral constraint. 
-                                            if debt_constraint(D, H, P, para) <= 0
-                                                continue 
-                                            end  
+                                    # Skip if debt exceeds the collateral constraint. 
+                                    if debt_constraint(D, H_prime, P, para) <= 0
+                                        continue 
+                                    end  
+
+                                        # Loop over consumption choices 
+                                        for c_index in 1:nc 
+                                            c = c_grid[c_index]
                                     
                                             # Loop over enter/not enter choices 
                                             for FC_index in 1:2
@@ -411,14 +413,12 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                                     # Find the continuation value 
                                                     # Loop over random variables 
                                                     for η_prime_index in 1:nη
-                                                        η_prime = η_grid[η_prime_index]
                                     
                                                         for ι_prime_index in 1:nι 
                                                             ι_prime = ι_grid[ι_prime_index]
                                         
                                                             R_prime = exp(ι_prime + μ)
-                                                            Y_Prime = exp(κ[j, 2])
-                                                            P_Prime = P_bar + exp(b * (j-1) + p_grid[η_prime_index])
+                                                            Y_Prime = κ[j, 2]
                                         
                                                             # Compute next period's liquid wealth
                                                             X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
@@ -457,14 +457,12 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                                         # Find the continuation value 
                                                         # Loop over random variables 
                                                         for η_prime_index in 1:nη
-                                                            η_prime = η_grid[η_prime_index]
                                         
                                                             for ι_prime_index in 1:nι  
                                                                 ι_prime = ι_grid[ι_prime_index]
                                         
                                                                 R_prime = exp(ι_prime + μ)
-                                                                Y_Prime = exp(κ[j, 2])
-                                                                P_Prime = P_bar + exp(b * (j-1) + p_grid[η_prime_index])
+                                                                Y_Prime = κ[j, 2]
                                         
                                                                 # Compute next period's liquid wealth
                                                                 X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
@@ -534,7 +532,7 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                 # Loop over aggregate income states
                 for η_index in 1:nη
                     η = η_grid[η_index]
-                    P = P_bar + exp(b * (j-1) + p_grid[η_index])
+                    P = P_bar * exp(b * (j-1) + p_grid[η_index])
 
                     # Loop over whether the agent was forced to move 
                     for Inv_Move_index in 1:2
@@ -545,6 +543,15 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                             IFC = IFC_grid[IFC_index]
                             candidate_max = -Inf  
 
+                        # Loop over Debt choices 
+                        for D_index in 1:nD
+                            D = D_grid[D_index]
+
+                            # Skip if debt exceeds the collateral constraint. 
+                            if debt_constraint(D, H, P, para) <= 0
+                                continue 
+                            end  
+
                             # Loop over consumption choices 
                             for c_index in 1:nc 
                                 c = c_grid[c_index]
@@ -552,15 +559,6 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                 # Loop over Housing choices 
                                 for H_prime_index in 1:nH 
                                     H_prime = H_grid[H_prime_index]
-
-                                    # Loop over Debt choices 
-                                    for D_index in 1:nD
-                                        D = D_grid[D_index]
-
-                                        # Skip if debt exceeds the collateral constraint. 
-                                        if debt_constraint(D, H, P, para) <= 0
-                                            continue 
-                                        end  
 
                                         # Loop over enter/not enter choices 
                                         for FC_index in 1:2
@@ -595,8 +593,7 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                                             ι_prime = ι_grid[ι_prime_index]
 
                                                             R_prime = exp(ι_prime + μ)
-                                                            Y_Prime = exp(η_prime + ω_prime + κ[j, 2])
-                                                            P_Prime = P_bar + exp(b * (j-1) + p_grid[η_prime_index])
+                                                            Y_Prime = κ[j, 2] * exp(η_prime + ω_prime)
 
                                                             # Compute next period's liquid wealth
                                                             X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
@@ -644,8 +641,7 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                                                 ι_prime = ι_grid[ι_prime_index]
 
                                                                 R_prime = exp(ι_prime + μ)
-                                                                Y_Prime = exp(η_prime + ω_prime + κ[j, 2])
-                                                                P_Prime = P_bar + exp(b * (j-1) + p_grid[η_prime_index])
+                                                                Y_Prime = κ[j, 2] * exp(η_prime + ω_prime)
 
                                                                 # Compute next period's liquid wealth
                                                                 X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
@@ -674,17 +670,49 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                     end 
                                 end 
                             end 
-                        end 
-                    end 
-                end 
-            end # η loop
-        end # X Loop
-    end # H Loop
-end # T loop
+                        end # IFC Loop
+                    end # Inv_Move Loop
+                end # η loop
+            end # X Loop 
+        end # H Loop 
+    end  # T loop 
+end
 
 para, sols = Initialize_Model()
-Solve_Retiree_Problem(para, sols)
-Solve_Worker_Problem(para, sols)
+@time Solve_Retiree_Problem(para, sols)
+
+
+#########################################
+# Checks
+#########################################
+@unpack_Model_Parameters para 
+@unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
+
+plot(X_grid, sols.val_func[10,1,:,1,2,1])
+plot(sols.D_pol_func[10,:,5,1,2,1])
+plot(sols.c_pol_func[10,:,5,1,2,1])
+plot(sols.H_pol_func[10,3,:,1,2,1])
+plot(sols.α_pol_func[10,2,:,1,2,1]) 
+
+# CHeck constraints
+D = sols.D_pol_func[10,3,1,1,2,1]
+c = sols.c_pol_func[10,3,1,1,2,1]
+FC = Int64(sols.FC_pol_func[10,3,1,1,2,1])
+α = sols.α_pol_func[10,3,1,1,2,1]
+H_prime = sols.H_pol_func[10,1,3,1,2,1]
+H = H_grid[1]
+Inv_Move = 1
+η_index = 1
+η = η_grid[η_index]
+P =  P_bar * exp(b * (10-1) + p_grid[η_index])
+X = X_grid[1]
+S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
+
+# Need to change: 
+# Potentially order of where the debt choice / debt constraint is checked 
+# Where the if-else conditions are will also change because of pruning from from IFC = 1 then FC = 0 
+# The Price law of motion needs to be made multiplicative 
+#Solve_Worker_Problem(para, sols)
 
 #= 
 # Instead of grid-searching, optimize. 
@@ -744,8 +772,7 @@ compute_objective(c::Float64, H_prime::Float64, D::Float64, α::Float64, FC::Int
                     ι_prime = ι_grid[ι_prime_index]
 
                     R_prime = exp(ι_prime + μ)
-                    Y_Prime = exp(η_prime + ω_prime + κ[T, 2])
-                    P_Prime = P_bar + exp(b * (j-1) + p_grid[η_prime_index])
+                    Y_Prime = κ[T, 2] * exp(η_prime + ω_prime)
 
                     # Compute next period's liquid wealth
                     X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
@@ -784,7 +811,6 @@ compute_objective(c::Float64, H_prime::Float64, D::Float64, α::Float64, FC::Int
 
                         R_prime = exp(ι_prime + μ)
                         Y_Prime = exp(η_prime + ω_prime + κ[T, 2])
-                        P_Prime = P_bar + exp(b * (j-1) + p_grid[η_prime_index])
 
                         # Compute next period's liquid wealth
                         X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
