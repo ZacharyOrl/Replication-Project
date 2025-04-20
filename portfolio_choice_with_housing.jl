@@ -106,24 +106,24 @@ using Parameters
     np::Int64 = nη
 
     # State / Choice Grids 
-    X_min::Float64 = 0.0
-    X_max::Float64 = 1000000.0/ Z
+    X_min::Float64 = 10000.0
+    X_max::Float64 = 300000.0/ Z
     nX::Int64 = 100
     X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
 
     c_min::Float64 = 0.0001
-    c_max::Float64 = X_max
+    c_max::Float64 = 3*X_max
     nc::Int64 = 100
     c_grid::Vector{Float64} = collect(range(c_min, length = nc, stop = c_max))
 
     H_min::Float64 = 0.2
-    H_max::Float64 = 10.0
+    H_max::Float64 = 5.0
     nH::Int64 = 10
     H_grid::Vector{Float64} = collect(range(H_min, length = nH, stop = H_max))
 
     D_min::Float64 = 0.0
-    D_max::Float64 = X_max
-    nD::Int64 = 50
+    D_max::Float64 = 3*X_max
+    nD::Int64 = 100
     D_grid::Vector{Float64} = collect(range(D_min, length = nD, stop = D_max))
 
     α_min::Float64 = 0.0
@@ -139,9 +139,8 @@ using Parameters
 end
 #initialize value function and policy functions
 mutable struct Solutions
-
-    val_func::Array{Float64,6} # 6 states, it turns out that the retired's value function still depends on η even after retirement,as it pins down housing.
-    # For each t and state, there are five choices
+    # 6 states, it turns out that the retired's value function still depends on η even after retirement,as it pins down housing.
+    val_func::Array{Float64,6} 
     c_pol_func::Array{Float64,6}
     H_pol_func::Array{Float64,6}
     D_pol_func::Array{Float64,6}
@@ -179,7 +178,7 @@ end
 function flow_utility_func(c::Float64, H::Float64, para::Model_Parameters)
     @unpack γ, θ = para
 
-    return (   ( c^(1-θ) * H^θ )^( 1 - γ )   ) / (1 - γ)
+    return 10^20 *(    ( c^(1-θ) * H^θ )^( 1 - γ )   ) / (1 - γ)
 end 
 
 # Takes as input all states and choices necessary to pin down the budget constraint
@@ -189,7 +188,7 @@ function budget_constraint(X::Float64, H::Float64, P::Float64, Inv_Move::Int64, 
     @unpack δ, F, λ = para
 
     # If there is no house trade
-    if Inv_Move == 0
+    if (Inv_Move == 0) && (H_prime == H)
         S_and_B = X - c - FC*F - δ * P * H + D
     # If there is a house trade 
     else 
@@ -210,25 +209,25 @@ end
 function compute_bequest_value(V::Array{Float64,5}, para::Model_Parameters)
     @unpack_Model_Parameters para 
 
-    # Loop over Housing States 
-    for H_index in 1:nH 
-        H = H_grid[H_index]
-    
-        # Loop over Cash-on-hand states
-        for X_index in 1:nX
-            X = X_grid[X_index]
-    
-            # Loop over aggregate income states
-            for η_index in 1:nη
-                η =  η_grid[η_index]
+    # Loop over aggregate income states
+    for η_index in 1:nη
+        η =  η_grid[η_index]
 
-                P = P_bar + exp(b * (T) + p_grid[η_index])
+        P = P_bar * exp(b * (T) + p_grid[η_index])
+
+        # Loop over Housing States 
+        for H_index in 1:nH 
+            H = H_grid[H_index]
+        
+            # Loop over Cash-on-hand states
+            for X_index in 1:nX
+                X = X_grid[X_index]
     
                 # Agents are forced to sell their house when they die
                     
                 W = X - δ * H * P +  (1-λ) *  P * H
 
-                V[H_index, X_index, η_index, :, :] .+= ( W^(1-γ) )/(1-γ)  
+                V[H_index, X_index, η_index, :, :] .+= 10^20 * ( W^(1-γ) )/(1-γ)  
             end 
         end 
     end 
@@ -294,6 +293,7 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                         # Loop over whether the agent has already paid their stock market entry cost 
                         for IFC_index in 1:2
                             IFC = IFC_grid[IFC_index]
+
                             candidate_max = -Inf  
 
                             # If an agent has already paid the stock market entry fee, they won't pay it again. 
@@ -348,21 +348,26 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                                         # Compute next period's liquid wealth
                                                         X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
     
-                                                        val += (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
+                                                        val += β * ( (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
                                                                 interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
-                                                                π * T_η[η_index, η_prime_index]   * T_ι[1, ι_prime_index] *
-                                                                interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)         
+                                                                 π * T_η[η_index, η_prime_index]   * T_ι[1, ι_prime_index] *
+                                                                interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)   
+                                                                )    
+                                                        
                                                     end 
                                                 end 
                                                 # Update value function
                                                 if val > candidate_max 
                                                     val_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]    = val
+                                                    #println("Value is: ", val)
 
                                                     c_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = c 
                                                     H_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = H_prime
                                                     D_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = D
                                                     FC_pol_func[j, H_index, X_index, η_index, Inv_Move_index,IFC_index] = FC
                                                     α_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = α
+
+                                                    candidate_max = val 
                                                 end 
                                             end 
                                         end 
@@ -423,25 +428,27 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                                             # Compute next period's liquid wealth
                                                             X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
                                         
-                                                            val += (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *                                # Not forced to Move 
+                                                            val += β * (
+                                                                    (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *                                # Not forced to Move 
                                                                     interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
                                                                     π     * T_η[η_index, η_prime_index] * T_ι[1, ι_prime_index] *                                # Forced to move
                                                                     interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
+                                                                    )
                                                         end 
                                                     end 
                                                                                         
                                                     # Update value function
                                                     if val > candidate_max 
                                                         val_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]    = val
-                                    
+                                                        #println("X is: ",X, " IFC is: ",IFC,"η is: ",η, " H is: ", H," Inv_Move is: ", H," Value is: ", val, )
                                                         c_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = c 
                                                         H_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = H_prime
                                                         D_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = D
                                                         FC_pol_func[j, H_index, X_index, η_index, Inv_Move_index,IFC_index] = FC
                                                         α_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = α
-                                                                                            
+                                                        
+                                                        candidate_max = val 
                                                     end 
-
                                                 # If !(IFC == 0 && FC == 0)
                                                 else 
                                                     # Loop over Risky-share choices
@@ -468,22 +475,24 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                                                 X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
                                                                 
                                                                                                             
-                                                                val += (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
+                                                                val += β * ((1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
                                                                         interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
                                                                         π * T_η[η_index, η_prime_index]   * T_ι[1, ι_prime_index] *
                                                                         interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
+                                                                        )
                                                                                                     
                                                             end 
                                                         end 
                                                         # Update value function
                                                         if val > candidate_max 
                                                             val_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]    = val
-                                        
+                                                            #println("X is: ",X, " IFC is: ",IFC,"η is: ",η, " H is: ", H," Inv_Move is: ", H," Value is: ", val)
                                                             c_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = c 
                                                             H_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = H_prime
                                                             D_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = D
                                                             FC_pol_func[j, H_index, X_index, η_index, Inv_Move_index,IFC_index] = FC
                                                             α_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = α
+                                                            candidate_max = val 
                                                         end 
                                                     end 
                                                 end 
@@ -585,7 +594,6 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                                 # Find the continuation value 
                                                 # Loop over random variables 
                                                 for η_prime_index in 1:nη
-                                                    η_prime = η_grid[η_prime_index]
 
                                                     for ω_prime_index in 1:nω
                                                         ω_prime = ω_grid[ω_prime_index]
@@ -598,23 +606,27 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                                             # Compute next period's liquid wealth
                                                             X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
 
-                                                            val += (1-π) * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *                                # Not forced to Move 
+                                                            val += β * ( (1-π) * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *                                # Not forced to Move 
                                                                    interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
                                                                    π     * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *                                # Forced to move
                                                                    interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
+                                                                        )
                                                         end 
                                                     end 
                                                 end 
                                                 
                                                 # Update value function
                                                 if val > candidate_max 
-                                                    val_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]    = val
-                                                    
-                                                    c_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = c 
-                                                    H_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = H_prime
-                                                    D_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = D
-                                                    FC_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1] = FC
-                                                    α_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = α
+                                                    val_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]    = val
+                                                    #println("Value is: ", val)
+
+                                                    c_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = c 
+                                                    H_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = H_prime
+                                                    D_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = D
+                                                    FC_pol_func[j, H_index, X_index, η_index, Inv_Move_index,IFC_index] = FC
+                                                    α_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = α
+
+                                                    candidate_max = val 
                                                     
                                                 end 
                                             # If !(IFC == 0 && FC == 0)
@@ -632,7 +644,6 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                                     # Find the continuation value 
                                                     # Loop over random variables 
                                                     for η_prime_index in 1:nη
-                                                        η_prime = η_grid[η_prime_index]
 
                                                         for ω_prime_index in 1:nω
                                                             ω_prime = ω_grid[ω_prime_index]
@@ -645,24 +656,27 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
 
                                                                 # Compute next period's liquid wealth
                                                                 X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
-
                                                                 
-                                                                val += (1-π) * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *
+                                                                val += β * ((1-π) * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *
                                                                     interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
                                                                      π * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *
                                                                     interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
+                                                                        )
                                                             end 
                                                         end 
                                                     end 
                                                     # Update value function
                                                     if val > candidate_max 
-                                                        val_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]    = val
-
-                                                        c_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = c 
-                                                        H_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = H_prime
-                                                        D_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = D
-                                                        FC_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1] = FC
-                                                        α_pol_func[j, H_index, X_index, η_index, Inv_Move + 1, IFC + 1]  = α
+                                                        val_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]    = val
+                                                        #println("Value is: ", val)
+    
+                                                        c_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = c 
+                                                        H_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = H_prime
+                                                        D_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = D
+                                                        FC_pol_func[j, H_index, X_index, η_index, Inv_Move_index,IFC_index] = FC
+                                                        α_pol_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]  = α
+    
+                                                        candidate_max = val 
                                                     end 
                                                 end 
                                             end 
@@ -681,25 +695,27 @@ end
 para, sols = Initialize_Model()
 @time Solve_Retiree_Problem(para, sols)
 
-
 #########################################
 # Checks
 #########################################
 @unpack_Model_Parameters para 
 @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
 
-plot(X_grid, sols.val_func[10,1,:,1,2,1])
-plot(sols.D_pol_func[10,:,5,1,2,1])
-plot(sols.c_pol_func[10,:,5,1,2,1])
-plot(sols.H_pol_func[10,3,:,1,2,1])
-plot(sols.α_pol_func[10,2,:,1,2,1]) 
+plot(X_grid, sols.val_func[10,1,:,1,1,1])
+plot(X_grid, sols.val_func[9,2,:,1,1,1])
+plot(X_grid,sols.D_pol_func[10,5,:,1,1,1])
+plot(sols.c_pol_func[9,2,:,1,1,1])
+plot!(sols.c_pol_func[10,2,:,1,2,1])
+plot(sols.H_pol_func[10,10,:,1,1,2])
+plot!(sols.H_pol_func[10,10,:,1,2,2])
+plot(sols.α_pol_func[9,10,:,1,1,1]) 
 
 # CHeck constraints
-D = sols.D_pol_func[10,3,1,1,2,1]
-c = sols.c_pol_func[10,3,1,1,2,1]
-FC = Int64(sols.FC_pol_func[10,3,1,1,2,1])
-α = sols.α_pol_func[10,3,1,1,2,1]
-H_prime = sols.H_pol_func[10,1,3,1,2,1]
+D = sols.D_pol_func[10,1,10,1,1,1]
+c = sols.c_pol_func[10,1,10,1,1,1]
+FC = Int64(sols.FC_pol_func[10,1,10,1,1,1])
+α = sols.α_pol_func[10,1,6,1,1,1]
+H_prime = sols.H_pol_func[10,1,6,1,1,1]
 H = H_grid[1]
 Inv_Move = 1
 η_index = 1
@@ -712,6 +728,7 @@ S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
 # Potentially order of where the debt choice / debt constraint is checked 
 # Where the if-else conditions are will also change because of pruning from from IFC = 1 then FC = 0 
 # The Price law of motion needs to be made multiplicative 
+# Need to add β to value function iteration step 
 #Solve_Worker_Problem(para, sols)
 
 #= 
