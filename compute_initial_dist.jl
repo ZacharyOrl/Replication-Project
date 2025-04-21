@@ -3,7 +3,7 @@
 ############################################################
 # Inputs: μ_0 - mean of the initial distribution, σ_0 - variance of the initial distribution, grid - a vector of grid points. 
 # Outputs: dist - a vector of masses associated with each grid point. 
-function compute_initial_dist(μ_0::Float64,σ_0::Float64, grid::Vector{Float64})
+function compute_initial_dist(μ_0::Float64, σ_0::Float64, grid::Vector{Float64})
     n = length(grid) 
 
     dist =zeros(n)

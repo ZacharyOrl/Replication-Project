@@ -48,7 +48,7 @@ cd(indir_parameters)
 
     # Housing parameters
     d::Float64 = 0.15                               # Down-Payment proportion 
-    π::Float64 = compound(1 + 0.03, 5) - 1          # Moving shock probability 
+    π::Float64 = compound(1 + 0.032, 5) - 1          # Moving shock probability 
     δ::Float64 = compound(1 + 0.01, 5) - 1          # Housing Depreciation
     λ::Float64 = 0.08                               # House-sale cost 
     b::Float64 = 5 * 0.01                           # Real log house price growth over 5 years  - matching the way it is presented in the paper 
@@ -79,7 +79,7 @@ cd(indir_parameters)
 
     # Deterministic earnings
     # For now, use what my own estimates from the PSID. 
-    κ::Matrix{Any} = hcat(CSV.File("life_cycle_income_1.csv").age_group, CSV.File("life_cycle_income_1.csv").age_dummies .- - log(Z)) 
+    κ::Matrix{Any} = vcat(hcat(CSV.File("life_cycle_income_1.csv").age_group, CSV.File("life_cycle_income_1.csv").age_dummies .- log(Z)),["Death" 0.0])
 
     # Stock market grids
     ι_grid::Vector{Float64} = rouwenhorst(σ_ι, 0.0, 3)[1] .- log(Z)
@@ -88,24 +88,24 @@ cd(indir_parameters)
 
     # Housing grids
     p_grid::Vector{Float64} = η_grid ./κ_η
-    P_bar::Float64 = 1 * 41.8/140.3 # For now, deflate using the ratio of CPI in 1972 to CPI in 1992
-                                          # CPI taken from https://fred.stlouisfed.org/series/CPIAUCSL 
+    P_bar::Float64 = 1 # Don't do anything - just let prices grow  [For now, deflate using the ratio of CPI in 1972 to CPI in 1992 
+                                          # CPI taken from https://fred.stlouisfed.org/series/CPIAUCSL   * 41.8/140.3]
     np::Int64 = nη
 
     # State / Choice Grids 
     X_min::Float64 = 0.01
-    X_max::Float64 = 300000.0/ Z
-    nX::Int64 = 40
+    X_max::Float64 = 500000.0/ Z
+    nX::Int64 = 20
     X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
 
     H_min::Float64 = 20000
-    H_max::Float64 = 1000000
-    nH::Int64 = 5
+    H_max::Float64 = 500000
+    nH::Int64 = 8
     H_grid::Vector{Float64} = collect(range(H_min, length = nH, stop = H_max))
 
     α_min::Float64 = 0.0
     α_max::Float64 = 1.0
-    nα::Int64 = 5
+    nα::Int64 = 6
     α_grid::Vector{Float64} = collect(range(α_min, length = nα, stop = α_max))
 
     Inv_Move_grid::Vector{Int64} = [0, 1]
@@ -173,7 +173,7 @@ include("Solve_Worker_Problem.jl")
 function flow_utility_func(c::Float64, H::Float64, para::Model_Parameters)
     @unpack γ, θ = para
 
-    return 10^20 *(    ( c^(1-θ) * H^θ )^( 1 - γ )   ) / (1 - γ)
+    return 10^10 *(    ( c^(1-θ) * H^θ )^( 1 - γ )   ) / (1 - γ)
 end 
 
 # Takes as input all states and choices necessary to pin down the budget constraint
@@ -219,10 +219,9 @@ function compute_bequest_value(V::Array{Float64,5}, para::Model_Parameters)
                 X = X_grid[X_index]
     
                 # Agents are forced to sell their house when they die
-                    
                 W = X - δ * H * P +  (1-λ) *  P * H
 
-                V[H_index, X_index, η_index, :, :] .+= 10^20 * ( W^(1-γ) )/(1-γ)  
+                V[H_index, X_index, η_index, :, :] .+= 10^10 * ( W^(1-γ) )/(1-γ)  
             end 
         end 
     end 
@@ -236,7 +235,7 @@ end
 function linear_interp(F::Array{Float64, 1}, x1::Vector{Float64})
     x1_grid = range(minimum(x1), maximum(x1), length=length(x1))
 
-    interp = interpolate(F, BSpline(Cubic()))
+    interp = interpolate(F, BSpline(Linear()))
     extrap = extrapolate(interp, Interpolations.Flat())
     return  extrap
 end
@@ -254,22 +253,22 @@ para, sols = Initialize_Model()
 @unpack_Model_Parameters para 
 @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
 
-plot(1:T, val_func[1,2,:,1,1,1])
-plot(X_grid, sols.val_func[1,3,:,1,1,1])
+plot(1:T, val_func[1:T,2,10,1,1,1])
+plot(X_grid, sols.val_func[9,2,:,1,1,1])
 plot(X_grid,sols.D_pol_func[10,5,:,1,1,1])
-plot(sols.c_pol_func[1,1,1,1,1,1])
+plot(sols.c_pol_func[10,5,:,1,1,1])
 plot!(sols.c_pol_func[10,2,:,1,2,1])
-plot(sols.H_pol_func[10,10,:,1,1,2])
-plot!(sols.H_pol_func[10,10,:,1,2,2])
+plot(sols.H_pol_func[10,1,:,1,1,2])
+plot!(sols.H_pol_func[10,1,:,1,2,2])
 plot(sols.α_pol_func[9,5,:,1,1,2]) 
 
 # CHeck constraints
-v = sols.val_func[9,2,2,1,1,1]
-D = sols.D_pol_func[9,2,1,1,1,1]
-c = sols.c_pol_func[9,1,1,1,1,1]
-FC = Int64(sols.FC_pol_func[9,2,2,1,1,1])
-α = sols.α_pol_func[9,2,2,1,1,1]
-H_prime = sols.H_pol_func[9,2,2,1,1,1]
+v = sols.val_func[2,1,2,1,1,1]
+D = sols.D_pol_func[1,1,2,1,1,1]
+c = sols.c_pol_func[10,1,2,1,1,1]
+FC = Int64(sols.FC_pol_func[10,1,2,1,1,1])
+α = sols.α_pol_func[10,1,2,1,1,1]
+H_prime = sols.H_pol_func[10,1,2,1,1,1]
 H_prime_index = 1
 # Compute X_prime
 j = 9
@@ -278,13 +277,14 @@ H = H_grid[2]
 Inv_Move = 0
 η_index = 1
 η_prime = η_grid[η_index]
-P = P_bar * exp(b * (j-1) + p_grid[η_index])
+P = 1 * exp(b * (j-1) + p_grid[η_index])
 
 ι_index = 1
 ι_prime = ι_grid[ι_index]
 
 # S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
 budget_constraint(X, H, P, Inv_Move,c, H_prime, D, FC, para)
+debt_constraint(D , H_prime, P, para)
 find_zero(c -> budget_constraint(X, H, P, Inv_Move,c, H_prime, D, FC, para), 100.0)
 sols.val_func[9,2,2,1,1,1]
 R_prime = exp(ι_prime + μ)
@@ -311,4 +311,38 @@ end
 plot(P[:,1:3])
 
 
-# Check 
+# Check ##################
+j = 10 
+H = H_grid[8]
+X = X_grid[1]
+η_index = 1
+η = η_grid[η_index] 
+Inv_Move_index = 1
+Inv_Move = Inv_Move_grid[Inv_Move_index]
+IFC_index = 1
+IFC = IFC_grid[IFC_index]
+
+D = sols.D_pol_func[10,8,1,1,1,1]
+c = sols.c_pol_func[10,8,1,1,1,1]
+FC = Int64(sols.FC_pol_func[10,8,1,1,1,1])
+α = sols.α_pol_func[10,8,1,1,1,1]
+H_prime = sols.H_pol_func[10,8,1,1,1,1]
+H_prime_index = 1
+P = P_bar * exp(b * (j-1) + p_grid[η_index])
+# Generate interpolation functions for cash-on hand given each possible combination of the other states tomorrow 
+interp_functions = Vector{Any}(undef, nH * nη * 2 * 2)
+for H_index in 1:nH
+    for η_prime_index in 1:nη
+        for Inv_Move in 0:1
+            for FC in 0:1
+                index = ((H_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (Inv_Move * 2) + FC + 1
+                interp_functions[index] = linear_interp(val_func[j+1, H_index, :, η_prime_index, Inv_Move + 1, FC + 1], X_grid)
+            end 
+        end 
+    end 
+end 
+
+v = sols.val_func[10,8,1,1,1,1]
+compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, FC, interp_functions, para)
+
+

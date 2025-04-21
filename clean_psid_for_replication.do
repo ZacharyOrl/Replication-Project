@@ -84,12 +84,18 @@ replace hh_income = 100* hh_income/price_level
 * Construct the cohort 
 gen cohort = year - age
 
+* Dummy if the household head is male 
+gen temp = (gender == 1 & relationship_head == 1)
+bysort hh_id year: egen male_head = max(temp)
+drop temp 
+
 * Impose sample restrictions 
 keep if inrange(year,1970,1992) // year must be between 1970 and 1992
 keep if oversample_id == 11 // Drop the SEO sample 
-keep if relationship_head == 1 // Consider household heads only 
-keep if gender == 1 // Consider only male HH heads
 keep if inrange(age, 25,74)	// Consider only observations used by Cocco
+keep if male_head == 1
+
+keep if relationship_head == 1 | relationship_head == 2
 
 * Drop if demographics are missing
 gen missing_dem = 0
@@ -128,7 +134,7 @@ collapse (last) five_year_hh_income married hh_size education wgt (first) year c
 gen log_hh_inc = log(five_year_hh_income)
 
 forvalues i = 1/3 {
-	reghdfe log_hh_inc i.age i.married hh_size if education == `i' [pweight = wgt], a(hh_id)
+	reghdfe log_hh_inc i.age_group i.married hh_size if education == `i' [pweight = wgt], a(hh_id year)
 	
 	// Extract coefficient estimates and standard errors
 	matrix b_est = e(b)
@@ -144,7 +150,7 @@ forvalues i = 1/3 {
 		coefplot matrix(b_plot),  ///
 		vertical ///
 		mcolor(navy%70) msymbol(circle) ///
-		xtitle("Years after layoff") ///
+		xtitle("Age") ///
 		connect(l) lcolor(black) lwidth(medthick) /// Added connecting line
 		ytitle("Earnings" "(1992 $)") ///
 		title("Five-year earnings for Education Group"  "`i'") ///

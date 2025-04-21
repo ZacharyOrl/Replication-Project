@@ -59,7 +59,14 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                     for α_index in 1:nα 
                                         α = α_grid[α_index]
 
-                                        D, c, val = optimize_worker_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, FC, interp_functions, para)
+                                        # Debt and bills are perfect substitutes
+                                        if α > 0.0 && α < 1.0
+                                            D = 0.0 
+                                            c = optimize_worker_c(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, D, FC, interp_functions, para)
+                                            val = compute_worker_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, FC, interp_functions, para)
+                                        else
+                                            D, c, val = optimize_worker_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, FC, interp_functions, para)
+                                        end 
 
                                             # Update value function
                                             if val > candidate_max 
@@ -114,7 +121,14 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                             for α_index in 1:nα 
                                                 α = α_grid[α_index]
                                         
-                                                D, c, val = optimize_worker_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, FC, interp_functions, para)
+                                                # Debt and bills are perfect substitutes. If α is not equal to zero or 1, then you must hold positive values of both stocks and bonds. 
+                                                if α > 0.0 && α < 1.0
+                                                    D  = 0.0 
+                                                    c  = optimize_worker_c(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, D, FC, interp_functions, para)
+                                                    val = compute_worker_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, FC, interp_functions, para)
+                                                else
+                                                    D, c, val = optimize_worker_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, FC, interp_functions, para)
+                                                end 
                                                 # Update value function
                                                 if val > candidate_max 
                                                     val_func[j, H_index, X_index, η_index, Inv_Move_index, IFC_index]    = val
