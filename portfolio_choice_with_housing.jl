@@ -4,7 +4,7 @@
 ###########################################
 # Packages 
 ###########################################
-using Parameters,DelimitedFiles, CSV, Plots, Distributions,LaTeXStrings, Statistics, DataFrames, LinearAlgebra, Optim, Interpolations, Base.Threads, Roots
+using Parameters,DelimitedFiles, CSV, Plots, Distributions,LaTeXStrings, Statistics, DataFrames, LinearAlgebra, Optim, Interpolations, Base.Threads, Roots, StaticArrays
 ###########################################
 indir = "C:/Users/zacha/Documents/Research Ideas/Housing and Portfolio Choice/Replication"
 
@@ -27,7 +27,7 @@ cd(indir_parameters)
     # Parameters with type annotations
     # Variance Parameters 
     σ_η::Float64 = 0.019^2  # Variance of persistent component of earnings
-    σ_ι::Float64 = 0.1674^2 # Variance of stock market innovation
+    σ_ι::Float64 = 5 * 0.1674^2 # Variance of stock market innovation
     σ_ω::Float64 = 0.136^2  # Start with the no-college case 
     σ_p::Float64 = 0.062^2  # Variance of house prices
 
@@ -43,8 +43,8 @@ cd(indir_parameters)
     # Returns / interest rates 
     R_D::Float64 =  compound(1 + 0.04, 5)                  # Mortgage interest rate 
     R_F::Float64 =  compound(1 + 0.02, 5)                  # Risk-free rate
-    R_S::Float64 = 0.1                                     # Expected return on stocks 
-    μ::Float64 = log(compound(1 + 0.1, 5) - σ_η/2)        # Expected log-return on stocks
+    R_S::Float64 = 0.1                                     # Expected annual return on stocks 
+    μ::Float64 = log(compound(1 + R_S, 5)) - σ_ι/2         # Expected log-return on stocks
 
     # Housing parameters
     d::Float64 = 0.15                               # Down-Payment proportion 
@@ -88,8 +88,7 @@ cd(indir_parameters)
 
     # Housing grids
     p_grid::Vector{Float64} = η_grid ./κ_η
-    P_bar::Float64 = 30500.0 * 140.3/(Z * 41.8) # For now, use an estimate of house prices in 1972 and inflate using the ratio of CPI in 1992 to CPI in 1972
-                                          # 1972 house prices taken from https://www.huduser.gov/periodicals/ushmc/winter2001/histdat08.htm 
+    P_bar::Float64 = 1 * 41.8/140.3 # For now, deflate using the ratio of CPI in 1972 to CPI in 1992
                                           # CPI taken from https://fred.stlouisfed.org/series/CPIAUCSL 
     np::Int64 = nη
 
@@ -99,24 +98,14 @@ cd(indir_parameters)
     nX::Int64 = 40
     X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
 
-    c_min::Float64 = 0.0001
-    c_max::Float64 = 3*X_max
-    nc::Int64 = 100
-    c_grid::Vector{Float64} = collect(range(c_min, length = nc, stop = c_max))
-
-    H_min::Float64 = 0.2
-    H_max::Float64 = 5.0
-    nH::Int64 = 10
+    H_min::Float64 = 20000
+    H_max::Float64 = 1000000
+    nH::Int64 = 5
     H_grid::Vector{Float64} = collect(range(H_min, length = nH, stop = H_max))
-
-    D_min::Float64 = 0.0
-    D_max::Float64 = 3*X_max
-    nD::Int64 = 20
-    D_grid::Vector{Float64} = collect(range(D_min, length = nD, stop = D_max))
 
     α_min::Float64 = 0.0
     α_max::Float64 = 1.0
-    nα::Int64 = 3
+    nα::Int64 = 5
     α_grid::Vector{Float64} = collect(range(α_min, length = nα, stop = α_max))
 
     Inv_Move_grid::Vector{Int64} = [0, 1]
@@ -140,7 +129,7 @@ end
 function build_solutions(para) 
 
     # Last two fields represent whether the agent has to move and whether they have previously paid the stock market entry fee
-    val_func = zeros(Float64,para.T + 1,para.nH,para.nX,para.nη,2,2 ) 
+    val_func    = zeros(Float64,para.T + 1,para.nH,para.nX,para.nη,2,2 ) 
     c_pol_func  = zeros(Float64,para.T,para.nH,para.nX,para.nη,2,2 ) 
     H_pol_func  = zeros(Float64,para.T,para.nH,para.nX,para.nη,2,2 ) 
     D_pol_func  = zeros(Float64,para.T,para.nH,para.nX,para.nη,2,2 ) 
@@ -265,52 +254,39 @@ para, sols = Initialize_Model()
 @unpack_Model_Parameters para 
 @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
 
-plot(H_grid, sols.val_func[9,:,90,1,1,1])
-plot(X_grid, sols.val_func[9,2,:,1,1,1])
+plot(1:T, val_func[1,2,:,1,1,1])
+plot(X_grid, sols.val_func[1,3,:,1,1,1])
 plot(X_grid,sols.D_pol_func[10,5,:,1,1,1])
-plot(sols.c_pol_func[9,2,:,1,1,1])
+plot(sols.c_pol_func[1,1,1,1,1,1])
 plot!(sols.c_pol_func[10,2,:,1,2,1])
 plot(sols.H_pol_func[10,10,:,1,1,2])
 plot!(sols.H_pol_func[10,10,:,1,2,2])
-plot(sols.α_pol_func[9,10,:,1,1,1]) 
+plot(sols.α_pol_func[9,5,:,1,1,2]) 
 
 # CHeck constraints
-D = sols.D_pol_func[9,2,2,1,1,1]
-c = sols.c_pol_func[9,2,2,1,1,1]
+v = sols.val_func[9,2,2,1,1,1]
+D = sols.D_pol_func[9,2,1,1,1,1]
+c = sols.c_pol_func[9,1,1,1,1,1]
 FC = Int64(sols.FC_pol_func[9,2,2,1,1,1])
 α = sols.α_pol_func[9,2,2,1,1,1]
 H_prime = sols.H_pol_func[9,2,2,1,1,1]
-
+H_prime_index = 1
 # Compute X_prime
 j = 9
 X = X_grid[2]
 H = H_grid[2]
-Inv_Move = 1
+Inv_Move = 0
 η_index = 1
 η_prime = η_grid[η_index]
 P = P_bar * exp(b * (j-1) + p_grid[η_index])
 
 ι_index = 1
 ι_prime = ι_grid[ι_index]
-H_prime = H_grid[2]
 
-S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
-
+# S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
+budget_constraint(X, H, P, Inv_Move,c, H_prime, D, FC, para)
 find_zero(c -> budget_constraint(X, H, P, Inv_Move,c, H_prime, D, FC, para), 100.0)
-
-# Check if an optimizer helps 
-function value_given_c(c, H_prime, D, α, state, para)
-    # Compute flow utility
-    u = flow_utility_func(c, H_prime, para)
-
-    # Compute asset tomorrow (returns, debt, etc.)
-    A_next = compute_next_assets(c, H, D, α, state, para)
-
-    # Interpolate or compute expected continuation value
-    EV = expected_value_next(A_next, ...)
-
-    return -(u + para.β * EV)  # Negative since GSS finds minimum
-end
+sols.val_func[9,2,2,1,1,1]
 R_prime = exp(ι_prime + μ)
 Y_Prime = κ[j, 2]
 
@@ -323,126 +299,16 @@ P =  P_bar * exp(b * (10-1) + p_grid[η_index])
 X = X_grid[1]
 S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
 
-# Need to change: 
-# Potentially order of where the debt choice / debt constraint is checked 
-# Where the if-else conditions are will also change because of pruning from from IFC = 1 then FC = 0 
-# The Price law of motion needs to be made multiplicative 
-# Need to add β to value function iteration step 
-#Solve_Worker_Problem(para, sols)
+P = zeros(10,10)
 
-#= 
-# Instead of grid-searching, optimize. 
-compute_objective(c::Float64, H_prime::Float64, D::Float64, α::Float64, FC::Int64,
-                  H::Float64, X::Float64, η::Float64, Inv_Move::Int64, IFC::Int64, para, sols)
-
-    # Impose consumption must be non-negative
-    if c <= 0
-        return -Inf
-    end
-
-    # Impose housing must exceed the minimum house size must be non-negative
-    if H_prime < H_min
-        return -Inf
-    end
-
-    # Impose the stock share must be non-negative
-    if α < 0
-        return -Inf
-    end
-
-    S_and_B  =  budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
-
-    # Skip if implied stock and bond spending must be negative
-    if S_and_B <= 0
-        return -Inf
-    end
-
-    # Skip if debt exceeds the collateral constraint. 
-    if debt_constraint(D, H, P, para) <= 0
-        return -Inf
-    end  
-
-    # If the person has not paid the entry cost and does not pay the entry cost today 
-    # they must invest 0 in stocks. 
-    if FC == 0 && IFC == 0 
-        if α > 0 
-            return -Inf 
-        end 
-
-
-        # Compute Stock and Bond Positions 
-        S = α * S_and_B 
-        B = (1-α) * S_and_B 
-
-        val = flow_utility_func(c, H, para)
-
-        # Find the continuation value 
-        # Loop over random variables 
-        for η_prime_index in 1:nη
-        η_prime = η_grid[η_prime_index]
-
-            for ω_prime_index in 1:nω
-                ω_prime = ω_grid[ω_prime_index]
-
-                for ι_prime_index in 1:nι 
-                    ι_prime = ι_grid[ι_prime_index]
-
-                    R_prime = exp(ι_prime + μ)
-                    Y_Prime = κ[T, 2] * exp(η_prime + ω_prime)
-
-                    # Compute next period's liquid wealth
-                    X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
-
-                    val += (1-π)  * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *                                # Not forced to Move 
-                            interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
-                            π     * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *                                # Forced to move
-                            interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
-                end 
-            end 
-        end 
-                                                
-
-    # If !(IFC == 0 && FC == 0)
-    else 
-        # Loop over Risky-share choices
-        for α_index in 1:nα 
-            α = α_grid[α_index]
-
-            # Compute Stock and Bond Positions 
-            S = α * S_and_B 
-            B = (1-α) * S_and_B 
-
-            val = flow_utility_func(c, H, para)
-
-            # Find the continuation value 
-            # Loop over random variables 
-            for η_prime_index in 1:nη
-                η_prime = η_grid[η_prime_index]
-
-                for ω_prime_index in 1:nω
-                    ω_prime = ω_grid[ω_prime_index]
-
-                    for ι_prime_index in 1:nι  
-                        ι_prime = ι_grid[ι_prime_index]
-
-                        R_prime = exp(ι_prime + μ)
-                        Y_Prime = exp(η_prime + ω_prime + κ[T, 2])
-
-                        # Compute next period's liquid wealth
-                        X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
-
-                                                                
-                        val += (1-π) * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *
-                                interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (0 * 2) + FC + 1](X_prime) +
-                                π * T_η[η_index, η_prime_index] * T_ω[1, ω_prime_index] * T_ι[1, ι_prime_index] *
-                                interp_functions[((H_prime_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (1 * 2) + FC + 1](X_prime)
-                    end 
-                end 
-            end 
-        end 
+for s = 1:10
+    for j = 1:10
+    ρ = rand(p_grid)
+    P[j,s] = P_bar * exp(b * (j-1) + ρ)
     end 
-
-    return val 
 end 
 
-=# 
+plot(P[:,1:3])
+
+
+# Check 
