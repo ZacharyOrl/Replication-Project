@@ -6,7 +6,8 @@
 ###########################################
 using Parameters,DelimitedFiles, CSV, Plots, Distributions,LaTeXStrings, Statistics, DataFrames, LinearAlgebra, Optim, Interpolations, Base.Threads, Roots, StaticArrays
 ###########################################
-indir = "C:/Users/zacha/Documents/Research Ideas/Housing and Portfolio Choice/Replication"
+ indir = "C:/Users/zacha/Documents/Research Ideas/Housing and Portfolio Choice/Replication"
+# indir = "/Client/C$/Users/zacha/Documents/Research Ideas/Housing and Portfolio Choice/Replication"
 
 indir_parameters = "C:/Users/zacha/Documents/Research Ideas/Housing and Portfolio Choice/Replication/parameters"
 cd(indir)
@@ -22,9 +23,7 @@ cd(indir_parameters)
     # Number of gridpoints for random variables 
     g = 3
 
-    # Gridpoints for cash on hand 
-
-    # Parameters with type annotations
+    # Parameters - Converting all annual variables to their five-year equivalents
     # Variance Parameters 
     σ_η::Float64 = 0.019^2  # Variance of persistent component of earnings
     σ_ι::Float64 = 5 * 0.1674^2 # Variance of stock market innovation
@@ -43,8 +42,8 @@ cd(indir_parameters)
     # Returns / interest rates 
     R_D::Float64 =  compound(1 + 0.04, 5)                  # Mortgage interest rate 
     R_F::Float64 =  compound(1 + 0.02, 5)                  # Risk-free rate
-    R_S::Float64 = 0.1                                     # Expected annual return on stocks 
-    μ::Float64 = log(compound(1 + R_S, 5)) - σ_ι/2         # Expected log-return on stocks
+    R_S::Float64 = 0.12                                    # Expected annual return on stocks 
+    μ::Float64 = log(compound(1 + R_S, 5)) - σ_ι/2         # Expected five-year log-return on stocks
 
     # Housing parameters
     d::Float64 = 0.15                               # Down-Payment proportion 
@@ -79,7 +78,7 @@ cd(indir_parameters)
 
     # Deterministic earnings
     # For now, use what my own estimates from the PSID. 
-    κ::Matrix{Any} = vcat(hcat(CSV.File("life_cycle_income_1.csv").age_group, CSV.File("life_cycle_income_1.csv").age_dummies .- log(Z)),["Death" 0.0])
+    κ::Matrix{Any} = vcat(hcat(CSV.File("life_cycle_income_3.csv").age_group, CSV.File("life_cycle_income_3.csv").age_dummies .- log(Z)),["Death" 0.0])
 
     # Stock market grids
     ι_grid::Vector{Float64} = rouwenhorst(σ_ι, 0.0, 3)[1] .- log(Z)
@@ -93,14 +92,14 @@ cd(indir_parameters)
     np::Int64 = nη
 
     # State / Choice Grids 
-    X_min::Float64 = 0.01
-    X_max::Float64 = 500000.0/ Z
-    nX::Int64 = 20
+    X_min::Float64 = -50000.0
+    X_max::Float64 = 700000.0/ Z
+    nX::Int64 = 40
     X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
 
-    H_min::Float64 = 20000
-    H_max::Float64 = 500000
-    nH::Int64 = 8
+    H_min::Float64 = 20000.0
+    H_max::Float64 = 200000.0
+    nH::Int64 = 6
     H_grid::Vector{Float64} = collect(range(H_min, length = nH, stop = H_max))
 
     α_min::Float64 = 0.0
@@ -129,12 +128,12 @@ end
 function build_solutions(para) 
 
     # Last two fields represent whether the agent has to move and whether they have previously paid the stock market entry fee
-    val_func    = zeros(Float64,para.T + 1,para.nH,para.nX,para.nη,2,2 ) 
-    c_pol_func  = zeros(Float64,para.T,para.nH,para.nX,para.nη,2,2 ) 
-    H_pol_func  = zeros(Float64,para.T,para.nH,para.nX,para.nη,2,2 ) 
-    D_pol_func  = zeros(Float64,para.T,para.nH,para.nX,para.nη,2,2 ) 
-    FC_pol_func = zeros(Float64,para.T,para.nH,para.nX,para.nη,2,2 ) 
-    α_pol_func  = zeros(Float64,para.T,para.nH,para.nX,para.nη,2,2 ) 
+    val_func    = zeros(Float64,2,2,para.nη, para.nH, para.nX, para.T + 1 ) 
+    c_pol_func  = zeros(Float64,2,2,para.nη, para.nH, para.nX, para.T ) 
+    H_pol_func  = zeros(Float64,2,2,para.nη, para.nH, para.nX, para.T ) 
+    D_pol_func  = zeros(Float64,2,2,para.nη, para.nH, para.nX, para.T ) 
+    FC_pol_func = zeros(Float64,2,2,para.nη, para.nH, para.nX, para.T ) 
+    α_pol_func  = zeros(Float64,2,2,para.nη, para.nH, para.nX, para.T ) 
 
     sols = Solutions(val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func)
 
@@ -173,7 +172,7 @@ include("Solve_Worker_Problem.jl")
 function flow_utility_func(c::Float64, H::Float64, para::Model_Parameters)
     @unpack γ, θ = para
 
-    return 10^10 *(    ( c^(1-θ) * H^θ )^( 1 - γ )   ) / (1 - γ)
+    return 10^20 *(    ( c^(1-θ) * H^θ )^( 1 - γ )   ) / (1 - γ)
 end 
 
 # Takes as input all states and choices necessary to pin down the budget constraint
@@ -204,24 +203,31 @@ end
 function compute_bequest_value(V::Array{Float64,5}, para::Model_Parameters)
     @unpack_Model_Parameters para 
 
-    # Loop over aggregate income states
-    for η_index in 1:nη
-        η =  η_grid[η_index]
-
-        P = P_bar * exp(b * (T) + p_grid[η_index])
+    # Loop over Cash-on-hand states
+    for X_index in 1:nX
+        X = X_grid[X_index]
 
         # Loop over Housing States 
         for H_index in 1:nH 
             H = H_grid[H_index]
-        
-            # Loop over Cash-on-hand states
-            for X_index in 1:nX
-                X = X_grid[X_index]
+            
+
+            # Loop over aggregate income states
+            for η_index in 1:nη
+                η =  η_grid[η_index]
+
+                P = P_bar * exp(b * (T) + p_grid[η_index])
     
                 # Agents are forced to sell their house when they die
-                W = X - δ * H * P +  (1-λ) *  P * H
+                W = X - δ * H * P +  (1-λ) *  P * H     
+                
+                # Account for agents essentially taking on impractical levels of debt that could leave them endowing nothing. 
+                if W < 0 
+                    V[:, :, η_index, H_index, X_index] .+= -Inf 
+                else
 
-                V[H_index, X_index, η_index, :, :] .+= 10^10 * ( W^(1-γ) )/(1-γ)  
+                V[:, :, η_index, H_index, X_index] .+= 10^20 * ( W^(1-γ) )/(1-γ)  
+                end 
             end 
         end 
     end 
@@ -230,7 +236,7 @@ function compute_bequest_value(V::Array{Float64,5}, para::Model_Parameters)
 end 
 
 # Creates a linear interpolation function using a mapping from grid x1 to outcome F. 
-# Cubic-spline interpolation within-grid
+# Cubic-spline interpolation within-grid - changed to linear because cubic spline wasn't working well for a pretty sparse grid. 
 # Allows for extrapolation outside the grid (Flat extrapolation)
 function linear_interp(F::Array{Float64, 1}, x1::Vector{Float64})
     x1_grid = range(minimum(x1), maximum(x1), length=length(x1))
@@ -253,34 +259,46 @@ para, sols = Initialize_Model()
 @unpack_Model_Parameters para 
 @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
 
-plot(1:T, val_func[1:T,2,10,1,1,1])
-plot(X_grid, sols.val_func[9,2,:,1,1,1])
-plot(X_grid,sols.D_pol_func[10,5,:,1,1,1])
-plot(sols.c_pol_func[10,5,:,1,1,1])
-plot!(sols.c_pol_func[10,2,:,1,2,1])
-plot(sols.H_pol_func[10,1,:,1,1,2])
-plot!(sols.H_pol_func[10,1,:,1,2,2])
-plot(sols.α_pol_func[9,5,:,1,1,2]) 
+
+plot(1:T+1, val_func[1,1,3,1,1,1:T+1])
+
+# Value function across X
+plot(X_grid,sols.val_func[1,1,1,3,:,10])
+plot!(X_grid,sols.val_func[1,2,1,3,:,10])
+
+# Consumption
+plot(sols.c_pol_func[1,2,1,1,:,10])
+plot!(sols.c_pol_func[1,2,1,1,:,10])
+
+# Housing 
+plot(sols.H_pol_func[1,1,1,1,:,10])
+plot!(sols.H_pol_func[2,1,1,1,:,10])
+
+# Debt 
+plot(sols.D_pol_func[1,1,1,1,:,10])
+plot!(sols.D_pol_func[2,1,1,1,:,10])
+
+# Stock share 
+plot(sols.α_pol_func[1,1,1,4,:,10]) 
 
 # CHeck constraints
-v = sols.val_func[2,1,2,1,1,1]
-D = sols.D_pol_func[1,1,2,1,1,1]
-c = sols.c_pol_func[10,1,2,1,1,1]
-FC = Int64(sols.FC_pol_func[10,1,2,1,1,1])
-α = sols.α_pol_func[10,1,2,1,1,1]
-H_prime = sols.H_pol_func[10,1,2,1,1,1]
+v = sols.val_func[1,2,1,1,3,10]
+D = sols.D_pol_func[1,2,1,1,3,10]
+c = sols.c_pol_func[1,2,1,1,3,10]
+FC = Int64(sols.FC_pol_func[1,2,1,1,3,10])
+α = sols.α_pol_func[1,2,1,1,3,10]
+H_prime = sols.H_pol_func[1,2,1,1,3,10]
 H_prime_index = 1
 # Compute X_prime
-j = 9
-X = X_grid[2]
-H = H_grid[2]
+j = 10
+X = X_grid[3]
+H = H_grid[1]
 Inv_Move = 0
 η_index = 1
-η_prime = η_grid[η_index]
-P = 1 * exp(b * (j-1) + p_grid[η_index])
+IFC_index = 2
+IFC = IFC_grid[IFC_index]
 
-ι_index = 1
-ι_prime = ι_grid[ι_index]
+P = 1 * exp(b * (j-1) + p_grid[η_index])
 
 # S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
 budget_constraint(X, H, P, Inv_Move,c, H_prime, D, FC, para)
@@ -310,39 +328,58 @@ end
 
 plot(P[:,1:3])
 
-
-# Check ##################
-j = 10 
-H = H_grid[8]
-X = X_grid[1]
-η_index = 1
-η = η_grid[η_index] 
-Inv_Move_index = 1
-Inv_Move = Inv_Move_grid[Inv_Move_index]
-IFC_index = 1
-IFC = IFC_grid[IFC_index]
-
-D = sols.D_pol_func[10,8,1,1,1,1]
-c = sols.c_pol_func[10,8,1,1,1,1]
-FC = Int64(sols.FC_pol_func[10,8,1,1,1,1])
-α = sols.α_pol_func[10,8,1,1,1,1]
-H_prime = sols.H_pol_func[10,8,1,1,1,1]
-H_prime_index = 1
-P = P_bar * exp(b * (j-1) + p_grid[η_index])
 # Generate interpolation functions for cash-on hand given each possible combination of the other states tomorrow 
-interp_functions = Vector{Any}(undef, nH * nη * 2 * 2)
-for H_index in 1:nH
-    for η_prime_index in 1:nη
-        for Inv_Move in 0:1
-            for FC in 0:1
-                index = ((H_index - 1) * nη * 2 * 2) + ((η_prime_index - 1) * 2 * 2) + (Inv_Move * 2) + FC + 1
-                interp_functions[index] = linear_interp(val_func[j+1, H_index, :, η_prime_index, Inv_Move + 1, FC + 1], X_grid)
-            end 
-        end 
-    end 
-end 
+interp_functions = Vector{Any}(undef, 2 * 2 * nη * nH) 
+for Inv_Move_index in 1:2
+    for IFC_index in 1:2
+        for η_prime_index in 1:nη
+            for H_index in 1:nH
+                # Compute linear index (row-major)
+                index = (Inv_Move_index - 1) * (2 * nη * nH) + (IFC_index - 1) * (nη * nH) + (η_prime_index - 1) * nH + H_index
 
-v = sols.val_func[10,8,1,1,1,1]
-compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, FC, interp_functions, para)
+                # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
+                interp_functions[index] = linear_interp(val_func[Inv_Move_index, IFC_index, η_prime_index, H_index, :, j+1], X_grid)
+            end
+        end
+    end
+end
+# IFC = 0 vs IFC = 1
+D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, 0.0, H_prime, H_prime_index, 0, FC, interp_functions, para)
 
+# Why does α = 0 and α = 1 lead to such different results, when the budget constraint is 0 anyway? 
+check = 2
+j = 10
+X = X_grid[3]
+H = H_grid[1]
+Inv_Move = 0
+η_index = 1
+IFC_index = check
+IFC = IFC_grid[IFC_index]
+P = 1 * exp(b * (j-1) + p_grid[η_index])
+
+v = sols.val_func[1,check,1,1,3,10]
+D = sols.D_pol_func[1,check,1,1,3,10]
+c = sols.c_pol_func[1,check,1,1,3,10]
+FC = Int64(sols.FC_pol_func[1,check,1,1,3,10])
+α = sols.α_pol_func[1,check,1,1,3,10]
+H_prime = sols.H_pol_func[1,check,1,1,3,10]
+H_prime_index = findfirst(x -> x == H_prime,H_grid)
+
+D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, check - 1, FC, interp_functions, para)
+
+# Generate interpolation functions for cash-on hand given each possible combination of the other states tomorrow 
+interp_functions = Vector{Any}(undef, 2 * 2 * nη * nH) 
+for Inv_Move_index in 1:2
+    for IFC_index in 1:2
+        for η_prime_index in 1:nη
+            for H_index in 1:nH
+                # Compute linear index (row-major)
+                index = (Inv_Move_index - 1) * (2 * nη * nH) + (IFC_index - 1) * (nη * nH) + (η_prime_index - 1) * nH + H_index
+
+                # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
+                interp_functions[index] = linear_interp(val_func[Inv_Move_index, IFC_index, η_prime_index, H_index, :, j+1], X_grid)
+            end
+        end
+    end
+end
 
