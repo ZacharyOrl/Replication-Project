@@ -146,7 +146,7 @@ end
 # Discretize the initial distribution of the permanent 
 # component. 
 ############################################################
-function compute_initial_dist(σ_0::Float64,grid::Vector{Float64})
+function compute_initial_dist(σ_0::Float64, grid::Vector{Float64})
     n = length(grid) 
 
     dist =zeros(n)

@@ -1,7 +1,7 @@
 # Solves the decision problem, outputs results back to the sols structure. 
 function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
     @unpack_Model_Parameters para 
-    @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
+    @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func, κ = sols
     println("Solving the Retiree's Problem")
 
     # Compute the bequest value of wealth
@@ -13,13 +13,14 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
         println("Age is ", 20 + 5*j)
         
        # Generate interpolation functions for cash-on hand given each possible combination of the other states tomorrow 
-        interp_functions = Vector{Any}(undef, 2 * 2 * nη * nH) 
+        interp_functions = Vector{Any}(undef, 2 * 2 * nη * (nH+1)) 
+
         for Inv_Move_index in 1:2
             for IFC_index in 1:2
                 for η_index in 1:nη
-                    for H_index in 1:nH
+                    for H_index in 1:nH + 1
                         # Compute linear index 
-                        index =  (H_index - 1) * (η_index * 4) + (η_index - 1) * 4 + (Inv_Move_index - 1) * 2 + (IFC_index - 1) + 1
+                        index = lin[Inv_Move_index, IFC_index, η_index, H_index]
                          # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
                         interp_functions[index] = linear_interp(val_func[Inv_Move_index, IFC_index, η_index, H_index, :, j+1], X_grid)
                     end
@@ -28,13 +29,13 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
         end
 
 
-        # Loop over Housing States 
+        # Loop over cash on hand states
         Threads.@threads for X_index in 1:nX
             X = X_grid[X_index]
 
-            # Loop over Cash-on-hand states
-            for H_index in 1:nH
-                H = H_grid[H_index]
+            # Loop over housing states
+            for H_index in 1:nH + 1
+                H = H_state_grid[H_index]
 
                 # Loop over aggregate income states
                 for η_index in 1:nη
@@ -58,7 +59,7 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
 
                                 # Loop over Housing choices 
                                 for H_prime_index in 1:nH 
-                                    H_prime = H_grid[H_prime_index]
+                                    H_prime = H_choice_grid[H_prime_index]
 
                                     # Loop over Risky-share choices
                                     for α_index in 1:nα 
@@ -99,7 +100,7 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
 
                                     # Loop over Housing choices 
                                     for H_prime_index in 1:nH 
-                                        H_prime = H_grid[H_prime_index]                                
+                                        H_prime = H_choice_grid[H_prime_index]                                
                                     
                                         # If the person has not paid the entry cost and does not pay the entry cost today 
                                         # they must invest 0 in stocks. 
@@ -181,7 +182,7 @@ function compute_retiree_value(j::Int64, H::Float64, P::Float64, X::Float64, η_
     S = α * S_and_B 
     B = (1-α) * S_and_B 
 
-    val = flow_utility_func(c, H, para)
+    val = flow_utility_func(c, H_prime, para)
 
     # Labor Income tomorrow
     Y_Prime = κ[j+1, 2]
@@ -196,10 +197,14 @@ function compute_retiree_value(j::Int64, H::Float64, P::Float64, X::Float64, η_
         # Compute next period's liquid wealth
         X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
         for η_prime_index in 1:nη
+
+            index_no_move = lin[1, IFC_prime_index, η_prime_index, H_prime_index]                                                  
+            index_move = lin[2, IFC_prime_index, η_prime_index, H_prime_index]   
+
             val += ( β * ( (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
-                    interp_functions[(H_prime_index - 1) * (η_prime_index * 4) + (η_prime_index - 1) * 4 + (1 - 1) * 2 + (IFC_prime_index - 1) + 1](X_prime) +
+                    interp_functions[index_no_move](X_prime) +
                         π * T_η[η_index, η_prime_index]   * T_ι[1, ι_prime_index] *
-                    interp_functions[(H_prime_index - 1) * (η_prime_index * 4) + (η_prime_index - 1) * 4 + (2 - 1) * 2 + (IFC_prime_index - 1) + 1](X_prime)   
+                    interp_functions[index_move](X_prime)   
                     )   )
             
         end 
@@ -217,13 +222,13 @@ function optimize_retiree_c(j::Int64, H::Float64, P::Float64, X::Float64, η_ind
     c_max_case = find_zero(budget, X, Roots.Order1())
 
     if c_max_case < 0
-        return (c_opt = 0.0)
+        return 0.0
 
     else
         # Optimize using Brent's method
         result = optimize(c -> -compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para), 0.0, c_max_case, Brent())
         
-        return (c_opt = Optim.minimizer(result))
+        return Optim.minimizer(result)
     end 
 end
 
@@ -246,7 +251,8 @@ function optimize_retiree_d(j::Int64, H::Float64, P::Float64, X::Float64, η_ind
     @unpack_Model_Parameters para
     # Find maximum feasible consumption
     debt_limit(D) =  debt_constraint(D, H_prime, P, para)
-    D_max_case = find_zero(debt_limit, X, Roots.Order1())
+    initial_guess = (1-d) * H_prime * P / 2 # Guess half of the maximum value. 
+    D_max_case = find_zero(debt_limit,initial_guess , Roots.Order1())
 
     if D_max_case < 0
         return (D_opt = 0.0,c_opt = 0.0, val_opt = pun)
