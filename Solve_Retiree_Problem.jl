@@ -1,7 +1,8 @@
 # Solves the decision problem, outputs results back to the sols structure. 
 function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
     @unpack_Model_Parameters para 
-    @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func, κ = sols
+    @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
+    
     println("Solving the Retiree's Problem")
 
     # Compute the bequest value of wealth
@@ -198,8 +199,9 @@ function compute_retiree_value(j::Int64, H::Float64, P::Float64, X::Float64, η_
         X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
         for η_prime_index in 1:nη
 
-            index_no_move = lin[1, IFC_prime_index, η_prime_index, H_prime_index]                                                  
-            index_move = lin[2, IFC_prime_index, η_prime_index, H_prime_index]   
+            # Need to adjust the H_prime_index by 1 as the first entry in the choice grid corresponds to the second in the state grid. 
+            index_no_move = lin[1, IFC_prime_index, η_prime_index, H_prime_index + 1]                                                  
+            index_move = lin[2, IFC_prime_index, η_prime_index, H_prime_index + 1]   
 
             val += ( β * ( (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
                     interp_functions[index_no_move](X_prime) +
@@ -226,7 +228,7 @@ function optimize_retiree_c(j::Int64, H::Float64, P::Float64, X::Float64, η_ind
 
     else
         # Optimize using Brent's method
-        result = optimize(c -> -compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para), 0.0, c_max_case, Brent())
+        result = optimize(c -> -compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para), 0.0, c_max_case, Brent(); abs_tol = tol)
         
         return Optim.minimizer(result)
     end 
@@ -259,7 +261,7 @@ function optimize_retiree_d(j::Int64, H::Float64, P::Float64, X::Float64, η_ind
     else
     
     # Optimize using Brent's method
-    result = optimize(D -> -objective_D(D, j, H, P,  X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, para), 0.0, D_max_case, Brent())
+    result = optimize(D -> -objective_D(D, j, H, P,  X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, para), 0.0, D_max_case, Brent(); abs_tol = tol)
     D_opt = Optim.minimizer(result)
 
     c_opt = optimize_retiree_c(j, H, P, X, η_index, Inv_Move,α, H_prime, H_prime_index, D_opt, IFC, FC, interp_functions, para)

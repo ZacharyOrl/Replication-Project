@@ -1,8 +1,8 @@
 # Solves the decision problem, outputs results back to the sols structure. 
 function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
     @unpack_Model_Parameters para 
-    @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func, κ = sols
-    println("Solving the Worker's's Problem")
+    @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
+    println("Solving the Worker's Problem")
 
     println("Begin solving the model backwards")
     for j in TR-1:-1:1  # Backward induction
@@ -11,7 +11,6 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
         
        # Generate interpolation functions for cash-on hand given each possible combination of the other states tomorrow 
        interp_functions = Vector{Any}(undef, 2 * 2 * nη * (nH+1)) 
-       lin = LinearIndices((2, 2, nη, nH))
 
        for Inv_Move_index in 1:2
            for IFC_index in 1:2
@@ -90,7 +89,7 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                             else 
 
                                 # Loop over Housing choices 
-                                for H_prime_index in 1:nH + 1
+                                for H_prime_index in 1:nH
                                     H_prime = H_choice_grid[H_prime_index]                                
                                     
                                     # Loop over enter/not enter choices 
@@ -188,8 +187,8 @@ function compute_worker_value(j::Int64, H::Float64, P::Float64, X::Float64, η_i
     for η_prime_index in eachindex(η_grid)
         η_prime = η_grid[η_prime_index]
 
-        index_no_move = lin[1, IFC_prime_index, η_prime_index, H_prime_index]                                                  
-        index_move = lin[2, IFC_prime_index, η_prime_index, H_prime_index]   
+        index_no_move = lin[1, IFC_prime_index, η_prime_index, H_prime_index + 1]                                                  
+        index_move = lin[2, IFC_prime_index, η_prime_index, H_prime_index + 1]   
 
         for ω_prime_index in eachindex(ω_grid)
             ω_prime = ω_grid[ω_prime_index]
@@ -235,7 +234,7 @@ function optimize_worker_c(j::Int64, H::Float64, P::Float64, X::Float64, η_inde
 
     else
         # Optimize using Brent's method
-        result = optimize(c -> -compute_worker_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para), 0.0, c_max_case, Brent())
+        result = optimize(c -> -compute_worker_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para), 0.0, c_max_case, Brent(); abs_tol = tol)
         
         return Optim.minimizer(result)
     end 
@@ -266,7 +265,7 @@ function optimize_worker_d(j::Int64, H::Float64, P::Float64, X::Float64, η_inde
     else
     
     # Optimize using Brent's method
-    result = optimize(D -> -objective_worker_D(D, j, H, P,  X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, para), 0.0, D_max_case, Brent())
+    result = optimize(D -> -objective_worker_D(D, j, H, P,  X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, para), 0.0, D_max_case, Brent(); abs_tol = tol)
     D_opt = Optim.minimizer(result)
 
     c_opt = optimize_worker_c(j, H, P, X, η_index, Inv_Move,α, H_prime, H_prime_index, D_opt, IFC, FC, interp_functions, para)

@@ -7,7 +7,7 @@ function simulate_model(para,sols,S::Int64)
     c_interp_functions, D_interp_functions, H_interp_functions, FC_interp_functions, α_interp_functions = interpolate_policy_funcs(sols,para)
 
     # Distribution over the initial permanent component
-    initial_dist = Categorical(σ_0_grid)
+    initial_dist = 1.0
 
     # Distribution over the transitory component (use that it isn't persistent, so won't vary over time)
     transitory_dist = Categorical(T_ω[1,:])
@@ -19,26 +19,26 @@ function simulate_model(para,sols,S::Int64)
     perm_dists = [Categorical(T_η[i, :]) for i in 1:nη]
 
     # Outputs
-    bonds = zeros(S,N+1) 
-    stocks = zeros(S,N+1) 
-    stock_share = zeros(S, N+1)
-    stock_market_entry = zeros(S, N + 1)
-    IFC_paid = zeros(S, N + 1)
+    bonds = zeros(S,T+1) 
+    stocks = zeros(S,T+1) 
+    stock_share = zeros(S, T+1)
+    stock_market_entry = zeros(Int64, S,T+1)
+    IFC_paid = zeros(S,T+1)
 
-    housing = zeros(S,N+1)
-    cash_on_hand = zeros(S, N + 1) 
+    housing = zeros(S,T+1)
+    cash_on_hand = zeros(S,T+1) 
 
-    debt = zeros(S,N+1)
-    consumption = zeros(S,N+1) 
-    wealth = zeros(S,N+1) # Savings + Housing - Debt 
+    debt = zeros(S,T+1)
+    consumption = zeros(S,T+1) 
+    wealth = zeros(S,T+1) # Savings + Housing - Debt 
     bequest = zeros(S)
 
-    persistent = zeros(S,N+1)
-    transitory = zeros(S,N+1)
-    stock_market_shock = zeros(S, N+1)
+    persistent = zeros(S,T+1)
+    transitory = zeros(S,T+1)
+    stock_market_shock = zeros(S, T+1)
 
     for s = 1:S
-        η_index = rand(initial_dist)
+        η_index = 2 # For now, set the initial aggregate state to the average value. 
         ι_index = rand(stock_dist)
         ω_index   = rand(transitory_dist)
 
@@ -64,7 +64,7 @@ function simulate_model(para,sols,S::Int64)
         X_index = findfirst(x -> x >= 0.0, X_grid)
         IFC_index = 1
 
-        cash_on_hand[s,1]   = X_grid[X_index] + exp(κ[1,2] + η_grid[η_index] + ω_grid[ω_index])
+        cash_on_hand[s,1]   = X_grid[X_index] + κ[1,2] * exp(η_grid[η_index] + ω_grid[ω_index])
 
         # This is purely an input into the budget constraint and so is not saved.
         H = H_state_grid[H_index]
@@ -75,9 +75,17 @@ function simulate_model(para,sols,S::Int64)
         # Compute choices 
         consumption[s,1] = c_interp_functions[index,1](cash_on_hand[s,1])
         debt[s,1] = D_interp_functions[index,1](cash_on_hand[s,1])
-        housing[s,1]  =  H_interp_functions[index,1](cash_on_hand[s,1])
-        stock_market_entry[s,1] = FC_interp_functions[index,1](cash_on_hand[s,1])
-        stock_share[s,1] = α_interp_functions[index,1](cash_on_hand[s,1])
+
+        # Need to adjust housing and other choices so they are on the grid: 
+        housing[s,1]  =  H_state_grid[floor_grid_index(H_interp_functions[index,1](cash_on_hand[s,1]), H_state_grid)]
+
+        # Need to adjust stock market entry so it is on the grid 
+        stock_market_entry[s,1] = FC_grid[floor_grid_index(FC_interp_functions[index,1](cash_on_hand[s,1]), FC_grid)]
+        if stock_market_entry[s,1] == 0 && IFC_index == 1
+            stock_share[s,1] = 0.0
+        else 
+            stock_share[s,1] = α_interp_functions[index,1](cash_on_hand[s,1])
+        end 
    
         # Find next period's indices
         H_prime_index = findfirst(x -> x == housing[s,1], H_state_grid)
@@ -92,7 +100,7 @@ function simulate_model(para,sols,S::Int64)
         bonds[s,1] = (1.0 - stock_share[s,1]) *  S_and_B       
 
         # Compute wealth 
-        wealth[s,1] = stocks + bonds + P * housing[s,1] - debt[s,1]
+        wealth[s,1] = stocks[s,1] + bonds[s,1] + P * housing[s,1] - debt[s,1]
 
         # Simulate working age 
         for n = 2:TR - 1  
@@ -117,14 +125,14 @@ function simulate_model(para,sols,S::Int64)
 
             # Turn the indices of the choices last period to the states today.
             H_index =   H_prime_index
-            H = H_state_grid[H_index]'
+            H = H_state_grid[H_index]
 
             IFC_index = IFC_prime_index
 
             # Compute cash on hand 
             P = P_bar * exp(b * (n-1) + p_grid[η_index])
             R_S = exp(stock_market_shock[s,n] + μ)
-            Y = exp(κ[n,2] + η_grid[η_index] + ω_grid[ω_index])
+            Y = κ[n,2] + exp( η_grid[η_index] + ω_grid[ω_index])
             cash_on_hand[s,n] = Y + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
 
             # Overall index 
@@ -133,9 +141,16 @@ function simulate_model(para,sols,S::Int64)
             # Compute choices 
             consumption[s,n] = c_interp_functions[index,n](cash_on_hand[s,n])
             debt[s,n] = D_interp_functions[index,n](cash_on_hand[s,n])
-            housing[s,n]  =  H_interp_functions[index,n](cash_on_hand[s,n])
-            stock_market_entry[s,n] = FC_interp_functions[index,n](cash_on_hand[s,n])
-            stock_share[s,n] = α_interp_functions[index,n](cash_on_hand[s,n])
+            # Need to adjust housing and other choices so they are on the grid: 
+            housing[s,n]  =  H_state_grid[floor_grid_index(H_interp_functions[index,n](cash_on_hand[s,n]), H_state_grid)]
+
+            # Need to adjust stock market entry so it is on the grid 
+            stock_market_entry[s,n] = FC_grid[floor_grid_index(FC_interp_functions[index,n](cash_on_hand[s,n]), FC_grid)]
+            if stock_market_entry[s,n] == 0 && IFC_index == 1
+                stock_share[s,n] = 0.0
+            else 
+                stock_share[s,n] = α_interp_functions[index,n](cash_on_hand[s,n])
+            end 
    
             # Find next period's indices
             H_prime_index = findfirst(x -> x == housing[s,n], H_state_grid)
@@ -150,7 +165,7 @@ function simulate_model(para,sols,S::Int64)
             bonds[s,n] = (1.0 - stock_share[s,n]) *  S_and_B       
 
             # Compute wealth 
-            wealth[s,n] = stocks + bonds + P * housing[s,n] - debt[s,n]
+            wealth[s,n] = stocks[s,n]  + bonds[s,n] + P * housing[s,n] - debt[s,n]
 
         end 
 
@@ -182,7 +197,7 @@ function simulate_model(para,sols,S::Int64)
             # Compute cash on hand 
             P = P_bar * exp(b * (n-1) + p_grid[η_index])
             R_S = exp(stock_market_shock[s,n] + μ)
-            Y = exp(κ[n,2])
+            Y = κ[n,2]
             cash_on_hand[s,n] = Y + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
 
             # Overall index 
@@ -191,9 +206,16 @@ function simulate_model(para,sols,S::Int64)
             # Compute choices 
             consumption[s,n] = c_interp_functions[index,n](cash_on_hand[s,n])
             debt[s,n] = D_interp_functions[index,n](cash_on_hand[s,n])
-            housing[s,n]  =  H_interp_functions[index,n](cash_on_hand[s,n])
-            stock_market_entry[s,n] = FC_interp_functions[index,n](cash_on_hand[s,n])
-            stock_share[s,n] = α_interp_functions[index,n](cash_on_hand[s,n])
+            # Need to adjust housing and other choices so they are on the grid: 
+            housing[s,n]  =  H_state_grid[floor_grid_index(H_interp_functions[index,n](cash_on_hand[s,n]), H_state_grid)]
+
+            # Need to adjust stock market entry so it is on the grid 
+            stock_market_entry[s,n] = FC_grid[floor_grid_index(FC_interp_functions[index,n](cash_on_hand[s,n]), FC_grid)]
+            if stock_market_entry[s,n] == 0 && IFC_index == 1
+                stock_share[s,n] = 0.0
+            else 
+                stock_share[s,n] = α_interp_functions[index,n](cash_on_hand[s,n])
+            end 
    
             # Find next period's indices
             H_prime_index = findfirst(x -> x == housing[s,n], H_state_grid)
@@ -208,7 +230,7 @@ function simulate_model(para,sols,S::Int64)
             bonds[s,n] = (1.0 - stock_share[s,n]) *  S_and_B       
 
             # Compute wealth 
-            wealth[s,n] = stocks + bonds + P * housing[s,n] - debt[s,n]
+            wealth[s,n] = stocks[s,n] + bonds[s,n] + P * housing[s,n] - debt[s,n]
 
         end 
 
@@ -264,3 +286,16 @@ function interpolate_policy_funcs(sols::Solutions,para::Model_Parameters)
 
     return c_interp_functions, D_interp_functions, H_interp_functions, FC_interp_functions, α_interp_functions
 end 
+
+
+#=
+    floor_grid_index(x, grid)::Int
+
+Return the index of the greatest element in `grid` that is ≤ `x`.
+`grid` must be sorted in ascending order.
+If `x` is below the smallest grid value, 1 is returned.
+=#
+function floor_grid_index(x, grid)
+    hi = searchsortedfirst(grid, x)      # first element ≥ x
+    return (hi == 1) ? 1 : hi - 1        # step back one slot
+end

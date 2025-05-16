@@ -18,18 +18,18 @@ indir_parameters = "parameters"
 cd(indir_parameters)
 
 @with_kw struct Model_Parameters
-    # Normalize all dollar variables by Z
-    Z = 1
-
     # Number of gridpoints for random variables 
     g = 3
 
     # Parameters - Converting all annual variables to their five-year equivalents
     # Variance Parameters 
-    σ_η::Float64 = 2.142 * 0.019^2  # Variance of persistent component of earnings
+
+    # Variance of aggregate component of earnings, 
+    # 2.142 is the five year variance of an annual AR(1) with autocorrelation of 0.748 and var 0.019^2  
+    σ_η::Float64 = 2.142 * 0.019^2  
+    σ_p::Float64 = 2.142 * 0.062^2  # Variance of house prices - perfectly correlated with aggregate labor market. 
     σ_ι::Float64 = 5 * 0.1674^2 # Variance of stock market innovation
     σ_ω::Float64 = 0.136^2  # Start with the no-college case 
-    σ_p::Float64 = 2.142 * 0.062^2  # Variance of house prices
 
     # Correlations between processes 
     κ_ω::Float64 = 0.00     # Correlation between house prices and transitory component
@@ -38,7 +38,7 @@ cd(indir_parameters)
     φ::Float64 = compound(0.748,5)      # Autocorrelation in the persistent component 
 
     # One time stock market entry cost 
-    F::Float64 = 1000.0 / Z
+    F::Float64 = 1000.0 
 
     # Returns / interest rates 
     R_D::Float64 =  compound(1 + 0.04, 5)                  # Mortgage interest rate 
@@ -64,12 +64,12 @@ cd(indir_parameters)
 
     # Grids & Transition Matrices
     # Persistent Earnings
-    η_grid::Vector{Float64} = rouwenhorst(σ_η, φ, 3)[1] .- log(Z) # Normalize labor income by Z so need to subtract log(Z) from the log-process. 
+    η_grid::Vector{Float64} = rouwenhorst(σ_η, φ, 3)[1] 
     T_η::Matrix{Float64} = rouwenhorst(σ_η, φ, 3)[2]
     nη::Int64 = length(η_grid)
 
     # Transitory Earnings
-    ω_grid::Vector{Float64} = rouwenhorst(σ_ω, 0.0, 3)[1] .- log(Z)
+    ω_grid::Vector{Float64} = rouwenhorst(σ_ω, 0.0, 3)[1] 
     T_ω::Matrix{Float64} = rouwenhorst(σ_ω, 0.0, 3)[2]
     nω::Int64 = length(ω_grid)
 
@@ -77,8 +77,12 @@ cd(indir_parameters)
     # But what is η_0? He doesn't say... 
     η_0::Float64 = 0.0 # For now, assume that persistent earnings starts at the unconditional mean
 
+    # Deterministic earnings
+    # For now, use what my own estimates from the PSID. 
+    κ::Matrix{Any} = vcat(hcat(CSV.File("life_cycle_income_1.csv").age_group, CSV.File("life_cycle_income_1.csv").age_dummies),["Death" 0.0])
+
     # Stock market grids
-    ι_grid::Vector{Float64} = rouwenhorst(σ_ι, 0.0, 3)[1] .- log(Z)
+    ι_grid::Vector{Float64} = rouwenhorst(σ_ι, 0.0, 3)[1]
     T_ι::Matrix{Float64} = rouwenhorst(σ_ι, 0.0, 3)[2]
     nι::Int64 = length(ι_grid)
 
@@ -91,14 +95,14 @@ cd(indir_parameters)
     # Punishment value 
     pun::Float64 = -10^6 # The value agents face if they default. 
     # State / Choice Grids 
-    X_min::Float64 = -500000.0
-    X_max::Float64 = 700000.0/ Z
-    nX::Int64 = 100
+    X_min::Float64 = -100000.0
+    X_max::Float64 = 100000.0
+    nX::Int64 = 201
     X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
 
     H_min::Float64 = 20000.0
-    H_max::Float64 = 200000.0
-    nH::Int64 = 20
+    H_max::Float64 = 600000.0
+    nH::Int64 = 29
 
     # Agents start life with no housing and are forced to purchase a home in the first period. 
     H_choice_grid::Vector{Float64} = collect(range(H_min, length = nH, stop = H_max))
@@ -106,7 +110,7 @@ cd(indir_parameters)
 
     α_min::Float64 = 0.0
     α_max::Float64 = 1.0
-    nα::Int64 = 80
+    nα::Int64 = 50
     α_grid::Vector{Float64} = collect(range(α_min, length = nα, stop = α_max))
 
     Inv_Move_grid::Vector{Int64} = [0, 1]
@@ -117,6 +121,8 @@ cd(indir_parameters)
 
     # Index grid 
     lin::LinearIndices{4,Tuple{Base.OneTo{Int64},Base.OneTo{Int64},Base.OneTo{Int64},Base.OneTo{Int64}}} = LinearIndices((2, 2, nη, nH + 1))
+    
+    tol::Float64 = 100.0          # stop optimizing once the candidate bracket is ≤ $100 wide
 end
 #initialize value function and policy functions
 mutable struct Solutions
@@ -127,7 +133,6 @@ mutable struct Solutions
     D_pol_func::Array{Float64,6}
     FC_pol_func::Array{Float64,6}
     α_pol_func::Array{Float64,6}
-    κ::Matrix{Any}
 
 end
 
@@ -142,12 +147,7 @@ function build_solutions(para)
     FC_pol_func = zeros(Float64,2,2,para.nη, para.nH + 1, para.nX, para.T ) 
     α_pol_func  = zeros(Float64,2,2,para.nη, para.nH + 1, para.nX, para.T ) 
 
-    # Deterministic earnings
-    # For now, use what my own estimates from the PSID. 
-    κ = vcat(hcat(CSV.File("life_cycle_income_3.csv").age_group, CSV.File("life_cycle_income_3.csv").age_dummies .- log(Z)),["Death" 0.0])
-
-
-    sols = Solutions(val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func, κ)
+    sols = Solutions(val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func)
 
     return sols
 end 
@@ -177,6 +177,9 @@ include("Solve_Retiree_Problem.jl")
 
 # Function which solves the woker's problem, conditional on having already solved the retiree's problem, and stores the values into the solutions structure 
 include("Solve_Worker_Problem.jl")
+
+# Function which simulates S agent's lifecycles given having already solved the lifecycle problem 
+include("Simulate_model.jl")
 
 #########################################################
 # Functions 
@@ -265,7 +268,11 @@ end
 para, sols = Initialize_Model()
 @time Solve_Retiree_Problem(para, sols)
 @time Solve_Worker_Problem(para, sols)
-
+#########################################
+# Simulate the Model! 
+#########################################
+S = 10000
+bonds,stocks,stock_share,stock_market_entry,IFC_paid,housing,cash_on_hand,debt,consumption,wealth,bequest,persistent,transitory,stock_market_shock = @time simulate_model(para,sols,S)
 #########################################
 # Checks
 #########################################
@@ -280,19 +287,19 @@ age_grid = collect(range(start_age, length = 10, stop = end_age))
 plot(1:T+1, val_func[1,1,3,1,1,1:T+1])
 
 # Value function across X
-plot(sols.val_func[1,1,1,1,45:100,6])
-plot!(sols.val_func[2,1,1,1,45:100,6])
+plot(sols.val_func[1,1,1,1,:,6])
+plot!(sols.val_func[2,1,1,1,:,6])
 
 # Consumption
-plot(sols.c_pol_func[1,1,1,1,:,1])
+plot(sols.c_pol_func[1,1,1,:,:,1]')
 plot!(sols.c_pol_func[2,1,1,1,:,1])
 
 # Housing 
-plot(sols.H_pol_func[1,1,1,1,:,1])
+plot(sols.H_pol_func[1,1,1,:,:,1]')
 plot!(sols.H_pol_func[2,1,1,1,:,1])
 
 # Debt 
-plot(sols.D_pol_func[1,1,3,3,:,:])
+plot(sols.D_pol_func[1,1,3,:,:,1]')
 plot!(sols.D_pol_func[2,1,1,:,:,10])
 
 # Stock share 
@@ -347,70 +354,20 @@ for s = 1:1000
     end 
 end 
 
-plot(P[:,1:3])
+############################
+# Check simulation 
+############################
+consumption_path = mean(consumption, dims = 1)[1:T]
+wealth_path = mean(wealth, dims = 1)[1:T]
+stock_path = mean(stocks, dims = 1)[1:T]
+debt_path = mean(debt, dims = 1)[1:T]
+housing_path = mean(housing, dims = 1)[1:T]
 
-# Generate interpolation functions for cash-on hand given each possible combination of the other states tomorrow 
-interp_functions = Vector{Any}(undef, 2 * 2 * nη * nH) 
-for Inv_Move_index in 1:2
-    for IFC_index in 1:2
-        for η_prime_index in 1:nη
-            for H_index in 1:nH
-                # Compute linear index (row-major)
-                index = (Inv_Move_index - 1) * (2 * nη * nH) + (IFC_index - 1) * (nη * nH) + (η_prime_index - 1) * nH + H_index
+plot(age_grid, consumption_path)
+plot(age_grid, wealth_path)
+plot(age_grid, wealth_path)
+plot(age_grid,stock_path)
+plot(age_grid,debt_path)
+plot(age_grid,housing_path)
 
-                # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
-                interp_functions[index] = linear_interp(val_func[Inv_Move_index, IFC_index, η_prime_index, H_index, :, j+1], X_grid)
-            end
-        end
-    end
-end
-# IFC = 0 vs IFC = 1
-D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, 0.0, H_prime, H_prime_index, 0, FC, interp_functions, para)
-
-# Why does α = 0 and α = 1 lead to such different results, when the budget constraint is 0 anyway? 
-check = 2
-j = 10
-X = X_grid[3]
-H = H_grid[1]
-Inv_Move = 0
-η_index = 1
-IFC_index = check
-IFC = IFC_grid[IFC_index]
-P = 1 * exp(b * (j-1) + p_grid[η_index])
-
-v = sols.val_func[1,check,1,1,3,10]
-D = sols.D_pol_func[1,check,1,1,3,10]
-c = sols.c_pol_func[1,check,1,1,3,10]
-FC = Int64(sols.FC_pol_func[1,check,1,1,3,10])
-α = sols.α_pol_func[1,check,1,1,3,10]
-H_prime = sols.H_pol_func[1,check,1,1,3,10]
-H_prime_index = findfirst(x -> x == H_prime,H_grid)
-
-D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, check - 1, FC, interp_functions, para)
-
-# Generate interpolation functions for cash-on hand given each possible combination of the other states tomorrow 
-interp_functions = Vector{Any}(undef, 2 * 2 * nη * nH) 
-for Inv_Move_index in 1:2
-    for IFC_index in 1:2
-        for η_prime_index in 1:nη
-            for H_index in 1:nH
-                # Compute linear index (row-major)
-                index = (Inv_Move_index - 1) * (2 * nη * nH) + (IFC_index - 1) * (nη * nH) + (η_prime_index - 1) * nH + H_index
-
-                # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
-                interp_functions[index] = linear_interp(val_func[Inv_Move_index, IFC_index, η_prime_index, H_index, :, j+1], X_grid)
-            end
-        end
-    end
-end
-
-# Benchmark speed 
-@benchmark begin
-    A = rand(1000, 1000)
-    B = A * A
-end
-
-@benchmark rouwenhorst(σ_ω, 0.0, 3)
-
-@benchmark vcat(hcat(CSV.File("life_cycle_income_3.csv").age_group, CSV.File("life_cycle_income_3.csv").age_dummies .- log(Z)),["Death" 0.0])
-Threads.nthreads()
+histogram(cash_on_hand[:,7])
