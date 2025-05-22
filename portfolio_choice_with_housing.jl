@@ -4,7 +4,8 @@
 ###########################################
 # Packages 
 ###########################################
-using Parameters,DelimitedFiles, CSV, Plots, Distributions,LaTeXStrings, Statistics, DataFrames, LinearAlgebra, Optim, Interpolations, Base.Threads, Roots, StaticArrays
+using Parameters, DelimitedFiles, CSV, Plots, Distributions,LaTeXStrings, Statistics, FastGaussQuadrature 
+using DataFrames, LinearAlgebra, Optim, Interpolations, Base.Threads, Roots, StatsBase
 ###########################################
 # indir = "C:/Users/zacha/Documents/Research Ideas/Housing and Portfolio Choice/Replication"
 # indir = "/Client/C$/Users/zacha/Documents/Research Ideas/Housing and Portfolio Choice/Replication"
@@ -19,37 +20,36 @@ cd(indir_parameters)
 
 @with_kw struct Model_Parameters
     # Number of gridpoints for random variables 
-    g = 3
+    g = 7
 
     # Parameters - Converting all annual variables to their five-year equivalents
     # Variance Parameters 
 
     # Variance of aggregate component of earnings, 
-    # 2.142 is the five year variance of an annual AR(1) with autocorrelation of 0.748 and var 0.019^2  
-    σ_η::Float64 = 2.142 * 0.019^2  
-    σ_p::Float64 = 2.142 * 0.062^2  # Variance of house prices - perfectly correlated with aggregate labor market. 
-    σ_ι::Float64 = 5 * 0.1674^2 # Variance of stock market innovation
-    σ_ω::Float64 = 0.136^2  # Start with the no-college case 
+    # 16.64 is the five year variance of an annual AR(1) with autocorrelation of 0.748 and var 0.019^2 
+    σ_η::Float64 =     16.64 *  0.019^2  
+    σ_p::Float64 =     16.64 *  0.062^2  # Variance of house prices - perfectly correlated with aggregate labor market. 
+    σ_ι::Float64 =     5  * 0.1674^2  # Variance of stock market innovation
 
     # Correlations between processes 
     κ_ω::Float64 = 0.00     # Correlation between house prices and transitory component
-    κ_η::Float64 = σ_η/σ_p  # Regression coefficient of cyclical fluctuations in house prices on persistent component (correlation is 1)
-    ρ_ϵ_ι::Float64 = 0.0    # Correlation between persistent component of income and the stock market
-    φ::Float64 = compound(0.748,5)      # Autocorrelation in the persistent component 
+    κ_η::Float64 = sqrt(σ_η/σ_p)  # Regression coefficient of cyclical fluctuations in house prices on aggregae component (correlation is 1)
+    ρ_ϵ_ι::Float64 = 0.0    # Correlation between aggregae component of income and the stock market
+    φ::Float64 = 0.415      # Autocorrelation in the aggregae component 
 
     # One time stock market entry cost 
-    F::Float64 = 1000.0 
+    F::Float64 = 8000.0 
 
     # Returns / interest rates 
     R_D::Float64 =  compound(1 + 0.04, 5)                  # Mortgage interest rate 
     R_F::Float64 =  compound(1 + 0.02, 5)                  # Risk-free rate
-    R_S::Float64 =  compound(1 + 0.1, 5)                   # Expected return on stocks 
+    R_S::Float64 =  compound(1 + 0.08, 5)                   # Expected return on stocks 
     μ::Float64 = log(R_S) - σ_ι/2                          # Expected five-year log-return on stocks
 
     # Housing parameters
     d::Float64 = 0.15                               # Down-Payment proportion 
-    π::Float64 = compound(1 + 0.032, 5) - 1          # Moving shock probability 
-    δ::Float64 = compound(1 + 0.01, 5) - 1          # Housing Depreciation
+    π_m::Float64 = 1 - (1 - 0.032)^5                  # Moving shock probability 
+    δ::Float64 = 1 - 0.99^5                         # Housing Depreciation
     λ::Float64 = 0.08                               # House-sale cost 
     b::Float64 = 5 * 0.01                           # Real log house price growth over 5 years  - matching the way it is presented in the paper 
 
@@ -63,27 +63,18 @@ cd(indir_parameters)
     TR::Int64 = 9 # The final two time periods represent retirement 
 
     # Grids & Transition Matrices
-    # Persistent Earnings
-    η_grid::Vector{Float64} = rouwenhorst(σ_η, φ, 3)[1] 
-    T_η::Matrix{Float64} = rouwenhorst(σ_η, φ, 3)[2]
+    # aggregae Earnings
+    η_grid::Vector{Float64} =  tauchen_persistent(3,φ,sqrt((1-φ^2)*σ_η))[1] 
+    T_η::Matrix{Float64} = tauchen_persistent(3,φ,sqrt((1-φ^2)*σ_η))[2]
     nη::Int64 = length(η_grid)
 
-    # Transitory Earnings
-    ω_grid::Vector{Float64} = rouwenhorst(σ_ω, 0.0, 3)[1] 
-    T_ω::Matrix{Float64} = rouwenhorst(σ_ω, 0.0, 3)[2]
-    nω::Int64 = length(ω_grid)
-
-    # In the paper, there is no initial level of housing and LW_1 = 0 
-    # But what is η_0? He doesn't say... 
-    η_0::Float64 = 0.0 # For now, assume that persistent earnings starts at the unconditional mean
-
-    # Deterministic earnings
-    # For now, use what my own estimates from the PSID. 
-    κ::Matrix{Any} = vcat(hcat(CSV.File("life_cycle_income_1.csv").age_group, CSV.File("life_cycle_income_1.csv").age_dummies),["Death" 0.0])
+    # Compute the stationary distribution of aggregate earnings
+    # This will be the distribution over the initial aggregate state 
+    π_η::Vector{Float64} = stationary_distribution(η_grid, T_η)
 
     # Stock market grids
-    ι_grid::Vector{Float64} = rouwenhorst(σ_ι, 0.0, 3)[1]
-    T_ι::Matrix{Float64} = rouwenhorst(σ_ι, 0.0, 3)[2]
+    ι_grid::Vector{Float64} = tauchen_hussey_iid(g,sqrt(σ_ι), 0.0)[1]
+    T_ι::Matrix{Float64} = tauchen_hussey_iid(g,sqrt(σ_ι), 0.0)[2][1:g,1:1]'
     nι::Int64 = length(ι_grid)
 
     # Housing grids
@@ -93,15 +84,15 @@ cd(indir_parameters)
     np::Int64 = nη
 
     # Punishment value 
-    pun::Float64 = -10^6 # The value agents face if they default. 
+    pun::Float64 = -Inf # The value agents face if they default. 
     # State / Choice Grids 
-    X_min::Float64 = -100000.0
-    X_max::Float64 = 100000.0
+    X_min::Float64 = -1400000.0
+    X_max::Float64 =  4000000.0
     nX::Int64 = 201
     X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
 
     H_min::Float64 = 20000.0
-    H_max::Float64 = 600000.0
+    H_max::Float64 = 700000.0
     nH::Int64 = 29
 
     # Agents start life with no housing and are forced to purchase a home in the first period. 
@@ -122,10 +113,28 @@ cd(indir_parameters)
     # Index grid 
     lin::LinearIndices{4,Tuple{Base.OneTo{Int64},Base.OneTo{Int64},Base.OneTo{Int64},Base.OneTo{Int64}}} = LinearIndices((2, 2, nη, nH + 1))
     
-    tol::Float64 = 100.0          # stop optimizing once the candidate bracket is ≤ $100 wide
+    tol::Float64 = 500.0          # stop optimizing once the candidate bracket is ≤ $1000 wide
+
+    # Weighting grid for simulations - taken from Cocco 
+                            #    nhs  hs    clg
+    weights::Matrix{Float64} = [
+                                0.01  0.06  0.02;   # 25–29
+                                0.02  0.08  0.04;   # 30–34
+                                0.01  0.10  0.06;   # 35–39
+                                0.0175  0.075  0.0675;   # 40–44 - Values slightly adjusted to account for Cocco rounding
+                                0.01  0.05  0.03;   # 45–49
+                                0.0175  0.035  0.0175;   # 50–54 - Values slightly adjusted so the row sum matches Cocco
+                                0.02  0.04  0.02;   # 55–59
+                                0.02  0.03  0.02;   # 60–64
+                                0.02  0.04  0.01;   # 65–69
+                                0.02  0.03  0.01    # 70–74
+                                ]
+                            
 end
+
 #initialize value function and policy functions
 mutable struct Solutions
+
     # 6 states, it turns out that the retired's value function still depends on η even after retirement,as it pins down housing.
     val_func::Array{Float64,6} 
     c_pol_func::Array{Float64,6}
@@ -134,9 +143,12 @@ mutable struct Solutions
     FC_pol_func::Array{Float64,6}
     α_pol_func::Array{Float64,6}
 
+    σ_ω::Float64
+    κ::Matrix{Any}
+
 end
 
-function build_solutions(para) 
+function build_solutions(para, σ_ω::Float64, κ::Matrix{Any}) 
 
     # Value function has an extra level for housing due to the initial housing state of 0.0 
     # It has an extra level for age due to bequest. 
@@ -147,18 +159,28 @@ function build_solutions(para)
     FC_pol_func = zeros(Float64,2,2,para.nη, para.nH + 1, para.nX, para.T ) 
     α_pol_func  = zeros(Float64,2,2,para.nη, para.nH + 1, para.nX, para.T ) 
 
-    sols = Solutions(val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func)
+    sols = Solutions(val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func, σ_ω , κ)
 
     return sols
 end 
 
-function Initialize_Model() 
+function Initialize_Model(σ_ω::Float64, κ::Matrix{Any}) 
 
     para = Model_Parameters()
-    sols = build_solutions(para)
+    sols = build_solutions(para, σ_ω, κ)
 
     return para, sols 
 end
+
+# Idiosyncratic labor market parameters 
+σ_ω_nhs =  5 * 0.136^2  # No High-school
+σ_ω_hs =   5 * 0.131^2  # High-school
+σ_ω_clg =  5 * 0.133^2  # College
+
+# Deterministic earnings path for each group. 
+κ_nhs   = vcat(hcat(CSV.File("life_cycle_income_1_eyeballed_from_paper.csv").age_group, CSV.File("life_cycle_income_1_eyeballed_from_paper.csv").age_dummies),["Death" 0.0])
+κ_hs   = vcat(hcat(CSV.File("life_cycle_income_2_eyeballed_from_paper.csv").age_group, CSV.File("life_cycle_income_2_eyeballed_from_paper.csv").age_dummies),["Death" 0.0])
+κ_clg  = vcat(hcat(CSV.File("life_cycle_income_3_eyeballed_from_paper.csv").age_group, CSV.File("life_cycle_income_3_eyeballed_from_paper.csv").age_dummies),["Death" 0.0])
 
 ###########################################
 # Functions 
@@ -168,6 +190,12 @@ include("compound.jl")
 
 # Function which when given a vector of processes and an N for each process, returns a transition matrix and grid 
 include("rouwenhorst.jl")
+
+# Tauchen functions from Cutberto 
+include("tauchen_functions.jl")
+
+# Function which computes the stationary distribution of a Markov Chain 
+include("stationary_distribution.jl")
 
 # Function which computes an initial distribution over a given grid 
 include("compute_initial_dist.jl")
@@ -187,7 +215,7 @@ include("Simulate_model.jl")
 function flow_utility_func(c::Float64, H_prime::Float64, para::Model_Parameters)
     @unpack γ, θ = para
 
-    return 10^20 *(    ( c^(1-θ) * H_prime^θ )^( 1 - γ )   ) / (1 - γ)
+    return  (    ( c^(1-θ) * H_prime^θ )^( 1 - γ )   ) / (1 - γ)
 end 
 
 # Takes as input all states and choices necessary to pin down the budget constraint
@@ -226,12 +254,11 @@ function compute_bequest_value(V::Array{Float64,5}, para::Model_Parameters)
         for H_index in 1:nH + 1
             H = H_state_grid[H_index]
             
-
             # Loop over aggregate income states
             for η_index in 1:nη
                 η =  η_grid[η_index]
 
-                P = P_bar * exp(b * (T) + p_grid[η_index])
+                P = P_bar * exp(b * (T+1) + p_grid[η_index])
     
                 # Agents are forced to sell their house when they die
                 W = X - δ * H * P +  (1-λ) *  P * H     
@@ -241,7 +268,7 @@ function compute_bequest_value(V::Array{Float64,5}, para::Model_Parameters)
                     V[:, :, η_index, H_index, X_index] .+= pun 
                 else
 
-                V[:, :, η_index, H_index, X_index] .+= 10^20 * ( W^(1-γ) )/(1-γ)  
+                V[:, :, η_index, H_index, X_index] .+= ( W^(1-γ) )/(1-γ)  
                 end 
             end 
         end 
@@ -258,26 +285,84 @@ function linear_interp(F::Vector{Float64}, x1::Vector{Float64})
 
     interp = interpolate(F, BSpline(Linear()))
     scaled_interp = Interpolations.scale(interp,x1_grid)
-    extrap = extrapolate(scaled_interp, Interpolations.Flat())
-    return  extrap
+    return  scaled_interp
 end
 
+function sim_to_matrix(sim::SimResults)
+    #=
+    sim_to_matrix(sim)
+
+    Flatten every (S × T+1) field in `sim` into a column vector so the result is
+    `S*(T+1) × K`, where `K` is the number of variables.
+    =#
+
+    S, TT = size(sim.bonds)        # TT = T+1
+    N     = S*TT
+
+    # helper: vec(mat) flattens column-major into length-N vector
+    rep(x) = repeat(x, inner = TT)           # repeat vector S times
+
+    return hcat(
+        vec(sim.bonds),           vec(sim.stocks),            vec(sim.stock_share),
+        vec(sim.stock_market_entry), vec(sim.IFC_paid),
+        vec(sim.housing),         vec(sim.moved),             vec(sim.cash_on_hand),
+        vec(sim.debt),            vec(sim.consumption),       vec(sim.wealth),
+        rep(sim.bequest),                               # 1×S → repeat across ages
+        vec(sim.persistent),      vec(sim.transitory),        vec(sim.stock_market_shock),
+        vec(sim.weights_var),     vec(sim.education)   
+    )
+end
 #########################################
 # Solve the Model!
 #########################################
-para, sols = Initialize_Model()
-@time Solve_Retiree_Problem(para, sols)
-@time Solve_Worker_Problem(para, sols)
+# Solve the model for each group of agents 
+
+# No highschool
+para, sols_nhs = Initialize_Model(σ_ω_nhs, κ_nhs)
+@time Solve_Retiree_Problem(para, sols_nhs)
+@time Solve_Worker_Problem(para, sols_nhs)
+
+# High school
+para, sols_hs = Initialize_Model(σ_ω_hs, κ_hs)
+@time Solve_Retiree_Problem(para, sols_hs)
+@time Solve_Worker_Problem(para, sols_hs)
+
+# College 
+para, sols_clg = Initialize_Model(σ_ω_clg, κ_clg)
+@time Solve_Retiree_Problem(para, sols_clg)
+@time Solve_Worker_Problem(para, sols_clg)
+
 #########################################
 # Simulate the Model! 
 #########################################
 S = 10000
-bonds,stocks,stock_share,stock_market_entry,IFC_paid,housing,cash_on_hand,debt,consumption,wealth,bequest,persistent,transitory,stock_market_shock = @time simulate_model(para,sols,S)
+
+# Returns a simulation struct containing the model outputs
+sim_nhs = @time simulate_model(para, sols_nhs, S, 1)
+sim_hs = @time simulate_model(para, sols_hs, S, 2)
+sim_clg = @time simulate_model(para, sols_clg, S, 3)
+
+#########################################
+# Write 
+#########################################
+mat_nhs  = sim_to_matrix(sim_nhs)
+mat_hs   = sim_to_matrix(sim_hs)
+mat_clg  = sim_to_matrix(sim_clg)
+
+combined = vcat(mat_nhs, mat_hs, mat_clg)
+
+cols = [:bonds,:stocks,:stock_share,:sm_entry,:IFC_paid,
+        :housing,:moved,:cash,:debt,:cons,:wealth,:bequest,
+        :persistent,:transitory,:sm_shock,:wt,:edu]
+
+df = DataFrame(combined, cols)
+
+CSV.write("simulations_panel_eyeballed_from_paper.csv", df)
 #########################################
 # Checks
 #########################################
 @unpack_Model_Parameters para 
-@unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
+@unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func, κ, σ_ω = sols_nhs
 
 start_age = 25 
 end_age = 70
@@ -287,26 +372,26 @@ age_grid = collect(range(start_age, length = 10, stop = end_age))
 plot(1:T+1, val_func[1,1,3,1,1,1:T+1])
 
 # Value function across X
-plot(sols.val_func[1,1,1,1,:,6])
-plot!(sols.val_func[2,1,1,1,:,6])
+plot(sols_nhs.val_func[1,1,1,10,18:51,10])
+plot!(sols_nhs.val_func[2,1,1,10,18:51,10])
 
 # Consumption
-plot(sols.c_pol_func[1,1,1,:,:,1]')
+plot(c_pol_func[1,1,1,:,25,:]')
 plot!(sols.c_pol_func[2,1,1,1,:,1])
 
 # Housing 
-plot(sols.H_pol_func[1,1,1,:,:,1]')
-plot!(sols.H_pol_func[2,1,1,1,:,1])
+plot(H_pol_func[1,1,1,10,25,:])
+plot!(H_pol_func[2,1,1,5,:,10])
 
 # Debt 
-plot(sols.D_pol_func[1,1,3,:,:,1]')
+plot(X_grid,D_pol_func[1,1,1,1,25,:])
 plot!(sols.D_pol_func[2,1,1,:,:,10])
 
 # Stock share 
-plot(X_grid, sols.α_pol_func[1,1,1,1,:,:]) 
+plot(X_grid, α_pol_func[1,1,1,:,:,9]') 
 
 # Stock market entry payment 
-plot(X_grid, sols.FC_pol_func[1,1,1,:,:,10]') 
+plot(X_grid[10:25], FC_pol_func[1,1,1,1,10:25,1]) 
 
 # CHeck constraints
 v = sols.val_func[1,2,1,1,3,10]
@@ -357,17 +442,47 @@ end
 ############################
 # Check simulation 
 ############################
-consumption_path = mean(consumption, dims = 1)[1:T]
-wealth_path = mean(wealth, dims = 1)[1:T]
-stock_path = mean(stocks, dims = 1)[1:T]
-debt_path = mean(debt, dims = 1)[1:T]
-housing_path = mean(housing, dims = 1)[1:T]
+@unpack_Model_Parameters para 
+@unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func, κ, σ_ω = sols_nhs
+start_age = 25 
+end_age = 70
+
+age_grid = collect(range(start_age, length = 10, stop = end_age))
+
+consumption_path = mean(sim_nhs.consumption, dims = 1)[1:T]
+cash_on_hand_path = mean(sim_nhs.cash_on_hand, dims = 1)[1:T]
+wealth_path = mean(sim_nhs.wealth, dims = 1)[1:T]
+stock_path = mean(sim_nhs.stocks, dims = 1)[1:T]
+debt_path = mean(sim_nhs.debt, dims = 1)[1:T]
+housing_path = mean(sim_nhs.housing, dims = 1)[1:T]
+stock_market_entry_path = mean(sim_nhs.IFC_paid, dims = 1)[1:T]
+moved_path = mean(sim_nhs.moved, dims = 1)[1:T]
 
 plot(age_grid, consumption_path)
-plot(age_grid, wealth_path)
+plot(age_grid, cash_on_hand_path)
 plot(age_grid, wealth_path)
 plot(age_grid,stock_path)
 plot(age_grid,debt_path)
 plot(age_grid,housing_path)
+plot(age_grid,stock_market_entry_path)
+plot(age_grid,moved_path)
 
-histogram(cash_on_hand[:,7])
+histogram(sim_hs.debt[:,4])
+histogram(sim_hs.bonds[:,1])
+histogram(sim_hs.cash_on_hand[:,2])
+histogram(sim_hs.housing[:,6])
+histogram(sim_hs.stocks[:,2])
+histogram(sim_hs.stock_market_entry[:,2])
+histogram(sim_hs.bequest)
+histogram(stocks .+ bonds)
+
+# Stocks check 
+# Does anyone enter the stock market while holding 0 stocks? 
+stocks_chk = sim_hs.stocks[:,1]
+stocks_entry_chk = sim_hs.stock_market_entry[:,1]
+no_stocks = ifelse.(stocks_chk .== 0.0, stocks_entry_chk, missing)
+
+
+histogram(filtered)
+
+Threads.nthreads()

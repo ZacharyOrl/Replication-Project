@@ -1,7 +1,7 @@
 # Solves the decision problem, outputs results back to the sols structure. 
 function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
     @unpack_Model_Parameters para 
-    @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func = sols
+    @unpack val_func, c_pol_func, H_pol_func, D_pol_func, FC_pol_func, α_pol_func, κ = sols
     
     println("Solving the Retiree's Problem")
 
@@ -11,7 +11,7 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
     println("Begin solving the model backwards")
     for j in T:-1:TR  # Backward induction
 
-        println("Age is ", 20 + 5*j)
+        println("Age is ", 25 - 50/T + (50/T)*j)
         
        # Generate interpolation functions for cash-on hand given each possible combination of the other states tomorrow 
         interp_functions = Vector{Any}(undef, 2 * 2 * nη * (nH+1)) 
@@ -19,7 +19,7 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
         for Inv_Move_index in 1:2
             for IFC_index in 1:2
                 for η_index in 1:nη
-                    for H_index in 1:nH + 1
+                    for H_index in 1:(nH + 1)
                         # Compute linear index 
                         index = lin[Inv_Move_index, IFC_index, η_index, H_index]
                          # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
@@ -29,19 +29,18 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
             end
         end
 
-
         # Loop over cash on hand states
         Threads.@threads for X_index in 1:nX
             X = X_grid[X_index]
 
             # Loop over housing states
-            for H_index in 1:nH + 1
+            for H_index in 1:(nH + 1)
                 H = H_state_grid[H_index]
 
                 # Loop over aggregate income states
                 for η_index in 1:nη
                     η = η_grid[η_index]
-                    P = P_bar * exp(b * (j-1) + p_grid[η_index])
+                    P = P_bar * exp(b * (j) + p_grid[η_index])
 
                     # Loop over whether the agent was forced to move 
                     for Inv_Move_index in 1:2
@@ -69,10 +68,10 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                         # Debt and bills are perfect substitutes. If you are already in the stock market, any α < 1 implies D = 0.0 
                                         if  α < 1.0
                                             D  = 0.0 
-                                            c  = optimize_retiree_c(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para)
-                                            val = compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para)
+                                            c  = optimize_retiree_c(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, κ, para)
+                                            val = compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, κ, para)
                                         else
-                                            D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, para)
+                                            D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, κ, para)
                                         end 
 
                                         # Update value function
@@ -109,7 +108,7 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                             α_index = 1 
                                             α = α_grid[α_index]
                                     
-                                            D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, para)
+                                            D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, κ, para)
                                                                                         
                                             # Update value function
                                             if val > candidate_max 
@@ -133,10 +132,10 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
 
                                                 if  α < 1.0
                                                     D  = 0.0 
-                                                    c  = optimize_retiree_c(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para)
-                                                    val = compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para)
+                                                    c  = optimize_retiree_c(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, κ, para)
+                                                    val = compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, κ, para)
                                                 else
-                                                    D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, para)
+                                                    D, c, val = optimize_retiree_d(j, H, P, X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, κ, para)
                                                 end 
 
                                                 # Update value function
@@ -174,7 +173,10 @@ end
 # Optimization Functions 
 ######################################
 # Compute expectation function given both c and D
-function compute_retiree_value(j::Int64, H::Float64, P::Float64, X::Float64, η_index::Int64, Inv_Move::Int64, c::Float64, α::Float64, H_prime::Float64, H_prime_index::Int64, D::Float64, IFC::Int64, FC::Int64, interp_functions::Vector{Any}, para::Model_Parameters )
+function compute_retiree_value(j::Int64, H::Float64, P::Float64, X::Float64, η_index::Int64, Inv_Move::Int64, c::Float64, 
+                            α::Float64, H_prime::Float64, H_prime_index::Int64, D::Float64, IFC::Int64, FC::Int64, 
+                            interp_functions::Vector{Any}, κ::Matrix{Any}, para::Model_Parameters )
+
     @unpack_Model_Parameters para
     S_and_B = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
 
@@ -190,34 +192,51 @@ function compute_retiree_value(j::Int64, H::Float64, P::Float64, X::Float64, η_
 
     # Find the continuation value 
     # Loop over random variables 
-    for ι_prime_index in 1:nι
-        ι_prime = ι_grid[ι_prime_index]
 
-        R_prime = exp(ι_prime + μ)
+    # Compute the upper bound of cash on hand tomorrow 
+    R_prime_ub = exp(ι_grid[g] + μ)
+    X_prime_ub = R_prime_ub * S + R_F * B - R_D * D + Y_Prime
 
-        # Compute next period's liquid wealth
-        X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
-        for η_prime_index in 1:nη
+    # Compute the lower bound of cash on hand tomorrow 
+    R_prime_lb = exp(ι_grid[1] + μ)
+    X_prime_lb = R_prime_lb * S + R_F * B - R_D * D + Y_Prime
+    # Impose that the agent must invest such that they never leave the grid. 
+    if X_prime_lb < X_min || X_prime_ub > X_max || S_and_B < 0  
+        val += pun 
+    else 
+        for ι_prime_index in 1:nι
+            ι_prime = ι_grid[ι_prime_index]
 
-            # Need to adjust the H_prime_index by 1 as the first entry in the choice grid corresponds to the second in the state grid. 
-            index_no_move = lin[1, IFC_prime_index, η_prime_index, H_prime_index + 1]                                                  
-            index_move = lin[2, IFC_prime_index, η_prime_index, H_prime_index + 1]   
+            R_prime = exp(ι_prime + μ)
 
-            val += ( β * ( (1-π) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
-                    interp_functions[index_no_move](X_prime) +
-                        π * T_η[η_index, η_prime_index]   * T_ι[1, ι_prime_index] *
-                    interp_functions[index_move](X_prime)   
-                    )   )
+            # Compute next period's liquid wealth
+            X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
+
+            for η_prime_index in 1:nη
+
+                # Need to adjust the H_prime_index by 1 as the first entry in the choice grid corresponds to the second in the state grid. 
+                index_no_move = lin[1, IFC_prime_index, η_prime_index, H_prime_index + 1]                                                  
+                index_move    = lin[2, IFC_prime_index, η_prime_index, H_prime_index + 1]   
+
+                val += ( β * ( (1-π_m) * T_η[η_index, η_prime_index]  * T_ι[1, ι_prime_index] *
+                        interp_functions[index_no_move](X_prime) +
+                            π_m * T_η[η_index, η_prime_index]   * T_ι[1, ι_prime_index] *
+                        interp_functions[index_move](X_prime)   
+                        )   )
             
+            end 
+        
         end 
-    end 
+    end
 
    return val 
 end 
 
 # Optimize value function over c given a choice of D
-function optimize_retiree_c(j::Int64, H::Float64, P::Float64, X::Float64, η_index::Int64, Inv_Move::Int64, α::Float64, H_prime::Float64, H_prime_index::Int64, 
-                            D::Float64, IFC::Int64, FC::Int64, interp_functions::Vector{Any}, para::Model_Parameters)
+function optimize_retiree_c(j::Int64, H::Float64, P::Float64, X::Float64, η_index::Int64, Inv_Move::Int64, 
+                            α::Float64, H_prime::Float64,H_prime_index::Int64, D::Float64, IFC::Int64, 
+                            FC::Int64, interp_functions::Vector{Any}, κ::Matrix{Any}, para::Model_Parameters)
+
     @unpack_Model_Parameters para
     # Find maximum feasible consumption
     budget(c) =  budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
@@ -228,7 +247,7 @@ function optimize_retiree_c(j::Int64, H::Float64, P::Float64, X::Float64, η_ind
 
     else
         # Optimize using Brent's method
-        result = optimize(c -> -compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para), 0.0, c_max_case, Brent(); abs_tol = tol)
+        result = optimize(c -> -compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, κ, para), 0.0, c_max_case, Brent(); abs_tol = tol)
         
         return Optim.minimizer(result)
     end 
@@ -236,19 +255,20 @@ end
 
 # Find the value of the problem given a choice of D taking the optimizing choice of c function as given. 
 function objective_D(D::Float64, j::Int64, H::Float64, P::Float64, X::Float64, η_index::Int64, Inv_Move::Int64, α::Float64, H_prime::Float64, 
-                        H_prime_index::Int64, IFC::Int64, FC::Int64, interp_functions::Vector{Any}, para::Model_Parameters)
+                        H_prime_index::Int64, IFC::Int64, FC::Int64, interp_functions::Vector{Any}, κ::Matrix{Any}, para::Model_Parameters)
     @unpack_Model_Parameters para
 
     # Get optimal c for this D
-    c = optimize_retiree_c(j, H, P, X, η_index, Inv_Move,α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para)
+    c = optimize_retiree_c(j, H, P, X, η_index, Inv_Move,α, H_prime, H_prime_index, D, IFC, FC, interp_functions, κ, para)
     
     # Compute value
-    val = compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, para)
+    val = compute_retiree_value(j, H, P,  X, η_index, Inv_Move, c, α, H_prime, H_prime_index, D, IFC, FC, interp_functions, κ, para)
     return val  # Negative for maximization
 end
 
-function optimize_retiree_d(j::Int64, H::Float64, P::Float64, X::Float64, η_index::Int64, Inv_Move::Int64, α::Float64, H_prime::Float64, H_prime_index::Int64, 
-                             IFC::Int64, FC::Int64, interp_functions::Vector{Any}, para::Model_Parameters)
+function optimize_retiree_d(j::Int64, H::Float64, P::Float64, X::Float64, η_index::Int64, Inv_Move::Int64, α::Float64, 
+                            H_prime::Float64, H_prime_index::Int64, IFC::Int64, FC::Int64, 
+                            interp_functions::Vector{Any}, κ::Matrix{Any}, para::Model_Parameters)
 
     @unpack_Model_Parameters para
     # Find maximum feasible consumption
@@ -261,10 +281,10 @@ function optimize_retiree_d(j::Int64, H::Float64, P::Float64, X::Float64, η_ind
     else
     
     # Optimize using Brent's method
-    result = optimize(D -> -objective_D(D, j, H, P,  X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, para), 0.0, D_max_case, Brent(); abs_tol = tol)
+    result = optimize(D -> -objective_D(D, j, H, P,  X, η_index, Inv_Move, α, H_prime, H_prime_index, IFC, FC, interp_functions, κ, para), 0.0, D_max_case, Brent(); abs_tol = tol)
     D_opt = Optim.minimizer(result)
 
-    c_opt = optimize_retiree_c(j, H, P, X, η_index, Inv_Move,α, H_prime, H_prime_index, D_opt, IFC, FC, interp_functions, para)
+    c_opt = optimize_retiree_c(j, H, P, X, η_index, Inv_Move,α, H_prime, H_prime_index, D_opt, IFC, FC, interp_functions, κ, para)
     val_opt = -Optim.minimum(result)
         return (D_opt, c_opt, val_opt)
     end 

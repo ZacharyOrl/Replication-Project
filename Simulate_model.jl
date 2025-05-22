@@ -1,10 +1,18 @@
-function simulate_model(para,sols,S::Int64)
+function simulate_model(para,sols,S::Int64, edu::Int64)
     # Simulates the solved model S times, returns assets, consumption, income, persistent shock and transitroy shock by age. 
+    # Applies analysis weights based upon the education group. 
 
-    @unpack_Model_Parameters para
-    @unpack val_func,c_pol_func, D_pol_func, H_pol_func, FC_pol_func, α_pol_func = sols
+    @unpack ι_grid, η_grid,p_grid, H_state_grid, FC_grid, X_grid,  T_η, T_ι, nη, nH, π_η, T, TR, π_m, P_bar, b, μ, R_F, R_D, δ, λ, g, X_max, X_min, lin = para
+    @unpack val_func,c_pol_func, D_pol_func, H_pol_func, FC_pol_func, α_pol_func, κ, σ_ω = sols
+
+    # Generate Transitory earnings grid based on σ_w of group
+    ω_grid::Vector{Float64} = rouwenhorst(σ_ω, 0.0, g)[1] 
+    T_ω::Matrix{Float64} = rouwenhorst(σ_ω, 0.0, g)[2]
+    nω::Int64 = length(ω_grid)
 
     c_interp_functions, D_interp_functions, H_interp_functions, FC_interp_functions, α_interp_functions = interpolate_policy_funcs(sols,para)
+
+    # Education group 
 
     # Distribution over the initial permanent component
     initial_dist = 1.0
@@ -15,8 +23,11 @@ function simulate_model(para,sols,S::Int64)
     # Distribution over Stock Market Shock 
     stock_dist = Categorical(T_ι[1,:])
 
-    # State-contingent distributions over the permanent components
+    # State-contingent distributions over the aggregate states
     perm_dists = [Categorical(T_η[i, :]) for i in 1:nη]
+
+    # Stationary distribution over initial aggregate state
+    initial_dist = Categorical(π_η)
 
     # Outputs
     bonds = zeros(S,T+1) 
@@ -26,6 +37,7 @@ function simulate_model(para,sols,S::Int64)
     IFC_paid = zeros(S,T+1)
 
     housing = zeros(S,T+1)
+    moved = zeros(S,T+1)
     cash_on_hand = zeros(S,T+1) 
 
     debt = zeros(S,T+1)
@@ -37,8 +49,10 @@ function simulate_model(para,sols,S::Int64)
     transitory = zeros(S,T+1)
     stock_market_shock = zeros(S, T+1)
 
+    weights_var = zeros(S, T+1)
+    education   = ones(S, T+1) * edu
     for s = 1:S
-        η_index = 2 # For now, set the initial aggregate state to the average value. 
+        η_index = rand(initial_dist) # Draw the initial aggregate state from its stationary distribution 
         ι_index = rand(stock_dist)
         ω_index   = rand(transitory_dist)
 
@@ -48,7 +62,7 @@ function simulate_model(para,sols,S::Int64)
         stock_market_shock[s,1] = ι_grid[ι_index]
 
         # Initialize whether the agent has to involuntary move
-        if rand(Inv_Move_grid) == 0
+        if rand() > π_m
             Inv_Move_index = 1 
             Inv_Move = 0 
         else 
@@ -57,15 +71,16 @@ function simulate_model(para,sols,S::Int64)
         end 
 
         # Initialize the price index - perfectly correlated with the labor market state 
-        P = P_bar * exp(p_grid[η_index])
+        P = P_bar * exp(b + p_grid[η_index])
 
         # Start with 0 assets, 0 debt, 0 housing, not having entered the stock market
         H_index = 1 
-        X_index = findfirst(x -> x >= 0.0, X_grid)
         IFC_index = 1
 
-        cash_on_hand[s,1]   = X_grid[X_index] + κ[1,2] * exp(η_grid[η_index] + ω_grid[ω_index])
-
+        cash_on_hand[s,1]   = 0.0 + κ[1,2] * exp(η_grid[η_index] + ω_grid[ω_index])
+        if cash_on_hand[s,1] > X_max
+            println(cash_on_hand[s,n])
+        end 
         # This is purely an input into the budget constraint and so is not saved.
         H = H_state_grid[H_index]
 
@@ -78,6 +93,7 @@ function simulate_model(para,sols,S::Int64)
 
         # Need to adjust housing and other choices so they are on the grid: 
         housing[s,1]  =  H_state_grid[floor_grid_index(H_interp_functions[index,1](cash_on_hand[s,1]), H_state_grid)]
+        moved[s,1] = (housing[s,1] != H_state_grid[H_index])
 
         # Need to adjust stock market entry so it is on the grid 
         stock_market_entry[s,1] = FC_grid[floor_grid_index(FC_interp_functions[index,1](cash_on_hand[s,1]), FC_grid)]
@@ -115,7 +131,7 @@ function simulate_model(para,sols,S::Int64)
             stock_market_shock[s,n] = ι_grid[ι_index]
 
             # Initialize whether the agent has to involuntary move
-            if rand(Inv_Move_grid) == 1
+            if rand() > π_m
                 Inv_Move_index = 1 
                 Inv_Move = 0 
             else 
@@ -130,9 +146,14 @@ function simulate_model(para,sols,S::Int64)
             IFC_index = IFC_prime_index
 
             # Compute cash on hand 
-            P = P_bar * exp(b * (n-1) + p_grid[η_index])
+            P = P_bar * exp(b * (n) + p_grid[η_index])
             R_S = exp(stock_market_shock[s,n] + μ)
-            Y = κ[n,2] + exp( η_grid[η_index] + ω_grid[ω_index])
+            Y = κ[n,2] * exp( η_grid[η_index] + ω_grid[ω_index])
+
+            if cash_on_hand[s,n] > X_max
+                println(cash_on_hand[s,n])
+            end 
+
             cash_on_hand[s,n] = Y + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
 
             # Overall index 
@@ -143,6 +164,7 @@ function simulate_model(para,sols,S::Int64)
             debt[s,n] = D_interp_functions[index,n](cash_on_hand[s,n])
             # Need to adjust housing and other choices so they are on the grid: 
             housing[s,n]  =  H_state_grid[floor_grid_index(H_interp_functions[index,n](cash_on_hand[s,n]), H_state_grid)]
+            moved[s,n] = (housing[s,n] != housing[s,n-1])
 
             # Need to adjust stock market entry so it is on the grid 
             stock_market_entry[s,n] = FC_grid[floor_grid_index(FC_interp_functions[index,n](cash_on_hand[s,n]), FC_grid)]
@@ -180,7 +202,7 @@ function simulate_model(para,sols,S::Int64)
             stock_market_shock[s,n] = ι_grid[ι_index]
 
             # Initialize whether the agent has to involuntary move
-            if rand(Inv_Move_grid) == 1
+            if rand() > π_m
                 Inv_Move_index = 1 
                 Inv_Move = 0 
             else 
@@ -195,11 +217,14 @@ function simulate_model(para,sols,S::Int64)
             IFC_index = IFC_prime_index
 
             # Compute cash on hand 
-            P = P_bar * exp(b * (n-1) + p_grid[η_index])
+            P = P_bar * exp(b * (n) + p_grid[η_index])
             R_S = exp(stock_market_shock[s,n] + μ)
             Y = κ[n,2]
             cash_on_hand[s,n] = Y + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
-
+        
+            if cash_on_hand[s,n] > X_max
+                println("Y",Y, " cash on hand ",cash_on_hand[s,n], " bonds ", bonds[s,n-1], " stocks ", stocks[s,n-1])
+            end 
             # Overall index 
             index = lin[Inv_Move_index, IFC_index, η_index, H_index]
 
@@ -208,6 +233,7 @@ function simulate_model(para,sols,S::Int64)
             debt[s,n] = D_interp_functions[index,n](cash_on_hand[s,n])
             # Need to adjust housing and other choices so they are on the grid: 
             housing[s,n]  =  H_state_grid[floor_grid_index(H_interp_functions[index,n](cash_on_hand[s,n]), H_state_grid)]
+            moved[s,n] = (housing[s,n] != housing[s,n-1])
 
             # Need to adjust stock market entry so it is on the grid 
             stock_market_entry[s,n] = FC_grid[floor_grid_index(FC_interp_functions[index,n](cash_on_hand[s,n]), FC_grid)]
@@ -243,15 +269,25 @@ function simulate_model(para,sols,S::Int64)
         stock_market_shock[s,T+1] = ι_grid[ι_index]
 
         # Compute cash on hand 
-        P = P_bar * exp(b * T + p_grid[η_index])
+        P = P_bar * exp(b * (T+1) + p_grid[η_index])
         R_S = exp(stock_market_shock[s,T+1] + μ)
         cash_on_hand[s,T+1] = R_S * stocks[s,T+1] + R_F * bonds[s,T] - R_D * debt[s,T]
         
         # Agents are forced to sell their house when they die
-        bequest = cash_on_hand[s,T+1] - δ * housing[s,T] * P +  (1-λ) *  P * housing[s,T]    
+        bequest[s] = cash_on_hand[s,T+1] - δ * housing[s,T] * P +  (1-λ) *  P * housing[s,T]    
     end 
 
-    return bonds,stocks,stock_share,stock_market_entry,IFC_paid,housing,cash_on_hand,debt,consumption,wealth,bequest,persistent,transitory,stock_market_shock
+    # Add the age-weights for the education group 
+    for n = 1:T 
+        #weights_var[:,n] .= copy(weights[n,edu])
+    end 
+
+    return SimResults(
+        bonds, stocks, stock_share, stock_market_entry, IFC_paid,
+        housing, moved, cash_on_hand,
+        debt, consumption, wealth, bequest,
+        persistent, transitory, stock_market_shock, weights_var, education
+    )
 end
 
 function interpolate_policy_funcs(sols::Solutions,para::Model_Parameters)
@@ -269,7 +305,7 @@ function interpolate_policy_funcs(sols::Solutions,para::Model_Parameters)
             for Inv_Move_index in 1:2
                 for IFC_index in 1:2
                     for η_index in 1:nη
-                        for H_index in 1:nH + 1
+                        for H_index in 1:(nH + 1)
                             # Compute linear index 
                             index = lin[Inv_Move_index, IFC_index, η_index, H_index]
                             # Create interpolated policy functions
@@ -296,6 +332,42 @@ Return the index of the greatest element in `grid` that is ≤ `x`.
 If `x` is below the smallest grid value, 1 is returned.
 =#
 function floor_grid_index(x, grid)
-    hi = searchsortedfirst(grid, x)      # first element ≥ x
-    return (hi == 1) ? 1 : hi - 1        # step back one slot
+    hi = searchsortedfirst(grid, x) 
+    if hi > length(grid)
+        hi = length(grid)
+    end 
+    if grid[hi] > x     # first element ≥ x
+        return (hi == 1) ? 1 : hi - 1        # step back one slot
+    else 
+        return hi 
+    end 
+end
+
+#=
+    SimResults
+
+All data produced by one call to `simulate_model`.
+=#
+struct SimResults
+    bonds               ::Matrix{Float64}
+    stocks              ::Matrix{Float64}
+    stock_share         ::Matrix{Float64}
+    stock_market_entry  ::Matrix{Int}
+    IFC_paid            ::Matrix{Int}
+
+    housing             ::Matrix{Float64}
+    moved               ::Matrix{Float64}
+    cash_on_hand        ::Matrix{Float64}
+
+    debt                ::Matrix{Float64}
+    consumption         ::Matrix{Float64}
+    wealth              ::Matrix{Float64}
+    bequest             ::Vector{Float64}
+
+    persistent          ::Matrix{Float64}
+    transitory          ::Matrix{Float64}
+    stock_market_shock  ::Matrix{Float64}
+
+    weights_var         ::Matrix{Float64}
+    education           ::Matrix{Float64}
 end
