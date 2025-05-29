@@ -1,7 +1,7 @@
 ##############################################
 # This file creates the deterministic income 
-# lifecycle comparison plot. 
-#
+# lifecycle comparison plots and  
+# house price comparison plots. 
 ##############################################
 
 using Plots, CSV, DataFrames, LaTeXStrings
@@ -61,7 +61,4 @@ plot(years,HP_psid_index, ylabel = "Index (1981 = 100)", label = "House Price In
 plot!(years,HP_BIS, label = "House Price Index BIS")
 
 savefig("House Price Comparison.png") 
-
-
-
 
