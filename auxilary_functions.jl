@@ -13,7 +13,7 @@
 # 9: The time series of shocks for each age cohort ( age is as of 1989 as per Cocco)
 # 10: Each agent has a full simulated lifecycle in simulations. I pull only a single "age" from each lifecycle according to Cocco's weights.
 # 11: Compounds an annual rate over T periods. 
-
+# 12: Computes the stationary distribution of a Markov chain. 
 #############################################################################################
 # 1.
 #############################################################################################
@@ -250,6 +250,37 @@ end
 function compound(rate::Float64, T::Int)
     return (rate)^T
 end
+#############################################################################################
+# 12.  Computes the stationary distribution of a Markov Chain
+#############################################################################################
+function stationary_distribution(η_grid::Vector{Float64},T_η::Matrix{Float64}; S = 100000, burn_in = 2000)
+    nη = length(η_grid)
+    # Find the stationary distribution of aggregate income process η
+    perm_dists = [Categorical(T_η[i, :]) for i in 1:nη]
+
+    # Need to choose some initial state to start the markov-chain 
+    initial_dist = perm_dists[1]
+
+    persistent = zeros(S)
+    index_persistent = rand(initial_dist)
+
+    # Persistent and Transitory components 
+    persistent[1] = η_grid[index_persistent]
+
+    for s = 2:S
+
+        index_persistent = rand(perm_dists[index_persistent]) # Draw the new permanent component based upon the old one.         
+
+        # Outputs 
+        persistent[s] = η_grid[index_persistent]
+    end 
+
+    chain = persistent[(burn_in +1) : S]
+    state_counts = countmap(chain)                 # Dict( state => frequency )
+    T            = length(chain)
+    Stationary_Distribution = [ state_counts[η_grid[s]] / T for s in 1:nη ]
+    return Stationary_Distribution
+end 
 
 
 
