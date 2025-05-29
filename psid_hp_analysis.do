@@ -69,7 +69,7 @@ preserve
 restore 
 	
 * Find log house price growth 
-preserve 
+
 
 * Consider only 1 ob per household, the household head
 	keep if REL == 1	
@@ -138,8 +138,12 @@ preserve
            rows(1) ring(0) position(6))
 	graph export "$outdir_images/House Price Index Fluctuations.png", width(2000) replace	 
 	
-	* Construct a five-year home value index
+	preserve 
+		keep m_log_HOME_OWN_VAL_RD YEAR 
+		export delimited "$outdir_parameters/psid_log_house_price_index.csv", replace
+	restore 
 	
+	* Construct a five-year home value index	
 	egen year_group = cut(YEAR), at(1970(5)1992)
 	bysort year_group: egen m_log_HOME_OWN_VAL_RD_five = mean(log_HOME_OWN_VAL_RD)
 	
@@ -149,12 +153,17 @@ preserve
 	bysort year: gen n = _n
 	
 	summ residual_five if n == 1
-	* Generate classification for which year corresponds to which aggregate realization. 
-	xtile tertile = residual, n(3)
+	drop n
+	* Generate classification for which five-year group corresponds to which aggregate realization. 
 	
-	keep YEAR tertile
+	* Find the overall deviation from trend over the five year group. 
+	bysort year_group: egen sum_resid_year_group = sum(residual) 
+	
+	bysort year_group: gen n =_n 
+	keep if n == 1
+	
+	keep year_group sum_resid_year_group
 	export delimited "$outdir_parameters/aggregate_realization.csv", replace 
 	
-restore 
 
 	
