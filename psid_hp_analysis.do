@@ -36,7 +36,7 @@ preserve
 
 	clear all 
 	
-	import delimited "$indir/CPI.csv"
+	import delimited "$outdir_parameters/CPI.csv"
 	
 	gen YEAR = yofd(date(observation_date, "YMD"))
 	drop observation_date 
@@ -91,10 +91,10 @@ restore
 	sort YEAR 
 	
 	* House price index (1981 = 100) 
-	gen temp = m_log_HOME_OWN_VAL_RD if YEAR == 1981
+	gen temp = m_log_HOME_OWN_VAL_RD if YEAR == 1992
 	egen temp2 = max(temp)
 	
-	gen HP_INDEX_COCCO = 100 * exp(m_log_HOME_OWN_VAL_RD)/exp(temp)
+	gen HP_INDEX_COCCO = 100 * exp(m_log_HOME_OWN_VAL_RD)/exp(temp2)
 	drop temp temp2 
 	
 	gen temp = m_log_HOME_OWN_VAL_RD_w if YEAR == 1981
