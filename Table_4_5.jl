@@ -6,27 +6,31 @@ using Plots, CSV, DataFrames, Statistics
 indir_parameters = "parameters"
 cd(indir_parameters)
 
-simulated_data = DataFrame(CSV.File("simulations_panel_eyeballed_from_paper.csv"))
+simulated_data = DataFrame(CSV.File("simulations_panel_eyeballed_from_paper_no_hrisk.csv"))
 simulated_data = simulated_data[simulated_data.cons .!=   0.0, :]
 
 # Liquid Assets 
 simulated_data.liquid = simulated_data.bonds .+ simulated_data.stocks
 
 # Financial Assets 
-simulated_data.financial = simulated_data.wealth + simulated_data.debt
 simulated_data.real_estate = simulated_data.wealth + simulated_data.debt - simulated_data.liquid
+simulated_data.financial = simulated_data.real_estate + simulated_data.liquid
 
 # Total Assets 
 simulated_data.total = simulated_data.liquid + simulated_data.real_estate + simulated_data.expected_earnings
+
+# Net financial worth
+simulated_data.net_worth = simulated_data.financial - simulated_data.debt
+
 ##########################################################################
 # Table 4 Portfolio shares by financial assets
 ##########################################################################
 function compute_stats_Table4(df::DataFrame,group::String, greater_or_less::Int64)
 
     if greater_or_less == 0 
-       assets_filtered_dataset =  df[simulated_data[!,group]  .< 100000, :]
+       assets_filtered_dataset =  df[simulated_data[!,"net_worth"]  .< 100000, :]
     else 
-        assets_filtered_dataset =  df[simulated_data[!,group]  .>= 100000, :]
+        assets_filtered_dataset =  df[simulated_data[!,"net_worth"]  .>= 100000, :]
     end 
 
     stock_shr = assets_filtered_dataset.stocks ./(assets_filtered_dataset[!,group] )
@@ -63,7 +67,7 @@ colnames = [:liquid_under, :liquid_over,
             :financial_under, :financial_over,
             :total_under, :total_over]
 out_4 = DataFrame(Table_4,colnames)
-CSV.write("Table_4_estimates.csv", 
+CSV.write("Table_4_estimates_no_hrisk.csv", 
          out_4)
 ##################################################
 # Table 5. Portfolio composition over the lifecycle 
@@ -109,4 +113,4 @@ colnames = [:liquid_30orless, :liquid_35to45, :liquid_50to60, :liquid_65plus,
                     :total_30orless, :total_35to45, :total_50to60, :total_65plus]
 
 out_5 = DataFrame(Table_5,colnames)
-CSV.write("Table_5_estimates.csv", out_5)
+CSV.write("Table_5_estimates_no_hrisk.csv", out_5)
