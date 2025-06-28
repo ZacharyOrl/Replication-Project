@@ -4,8 +4,6 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
 
     @unpack ι_grid, η_grid,p_grid, H_grid, FC_grid, Move_grid, X_grid,  T_η, T_ι, nη, nH, π_η, T, TR, π_m, P_bar, b, μ, R_F, R_D, δ, λ, g, X_max, X_min, H_min, lin, wts = para
     @unpack val_func,c_pol_func, LTV_pol_func, H_pol_func, FC_pol_func, α_pol_func, Move_pol_func, κ, σ_ω = sols
-
-    (Random.seed!(123))
     
     # Set the number of simulations for this education group 
     wt_tot = sum(wts[:,edu])
@@ -357,11 +355,11 @@ function sim_to_matrix(sim::Sim_Results)
 
     return hcat(
         sim.bonds,           sim.stocks,            sim.stock_share,
-        sim.stock_market_entry, sim.IFC_paid,       sim.LTV,
+        sim.stock_market_entry,                     sim.IFC_paid,       
         sim.housing,         sim.moved,             sim.Inv_Move_shock,
         sim.cash_on_hand,    sim.expected_earnings,
-        sim.debt,            sim.consumption,       sim.wealth,
-        sim.bequest,         sim.income,                       
+        sim.debt,            sim.LTV,               sim.consumption,       
+        sim.wealth,          sim.bequest,           sim.income,                       
         sim.persistent,      sim.transitory,        sim.stock_market_shock,
         sim.age,     sim.education
         )           

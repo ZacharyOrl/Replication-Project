@@ -21,7 +21,7 @@
 # This function takes the choice of consumption and housing today and returns the flow utility value. 
 function flow_utility_func(c::Float64, H_prime::Float64, para::Model_Parameters)
     @unpack γ, θ = para
-
+    
     return  (    ( c^(1-θ) * H_prime^θ )^( 1 - γ )   ) / (1 - γ)
 end 
 

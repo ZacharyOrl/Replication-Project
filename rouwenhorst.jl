@@ -1,34 +1,20 @@
-#  Matches three moments: the expectation - autocorrelation and variance 
-#  you want to match and three parameters - N, σ and ρ. 
-#  this means the optimal GMM weighting matrix is identity 
+#  Generates discrete process which matches three moments of the target continuous process:
+#  the expectation - autocorrelation and variance. Uses three inputs - N, σ and ρ. 
 
-# Inputs[variance of process you want to discretize (not the variance of the shock), autocorrelation of that process, N = number of gridpoints; Weighting Matrix]
+# Inputs
+# [variance of process you want to discretize (not the variance of the shock), 
+#  autocorrelation of that process, 
+#  N = number of gridpoints; Weighting Matrix]
 # Outputs[gridpoint vector, transition probability matrix]
-function rouwenhorst(σ::Float64, ρ::Float64, N::Int64; W::Matrix{Float64} = Matrix{Float64}(I, 3, 3))
+function rouwenhorst(σ::Float64, ρ::Float64, N::Int64)
 
-    # --- Step 1: Compute theoretical moments from candidate parameters
-    function compute_moments(params::Vector{Float64}, N::Int64)
-        p, q, ψ = params
-        s = (1 - p) / (2 - (p + q))
-        expec = (q - p) * ψ / (2 - (p + q))
-        corr = p + q - 1
-        var = ψ^2 * (1 - 4s*(1 - s) + (4s*(1 - s))/(N - 1))
-        return [expec, corr, var]
-    end
-
-    # --- Step 2: GMM objective function
-    function objective(params::Vector{Float64}, W::Matrix{Float64}, sample_moments::Vector{Float64}, N::Int64)
-        model_moments = compute_moments(params, N)
-        g_hat = model_moments .- sample_moments
-        return g_hat' * W * g_hat
-    end
-
-    # --- Step 3: Estimate optimal (p, q, ψ) using GMM
-    function GMM(σ::Float64, ρ::Float64, N::Int64, W::Matrix{Float64})
-        sample_moments = [0.0, ρ, σ]
-        params_init = 0.5 * ones(3)
-        result = optimize(p -> objective(p, W, sample_moments, N), params_init, BFGS())
-        return Optim.minimizer(result)
+    # --- Step 3: Estimate optimal (p, q, ψ) using the method of moments
+    function GMM(σ::Float64, ρ::Float64, N::Int64)
+        p_hat = zeros(3)
+        p_hat[1] = (1 + ρ)/2 
+        p_hat[2] = (1 + ρ)/2 
+        p_hat[3] = sqrt(σ * (N-1))
+        return p_hat 
     end
 
     # --- Step 4: Construct transition matrix
@@ -57,7 +43,7 @@ function rouwenhorst(σ::Float64, ρ::Float64, N::Int64; W::Matrix{Float64} = Ma
     end
 
     # === Call steps ===
-    p_hat = GMM(σ, ρ, N, W)
+    p_hat = GMM(σ, ρ, N)
     P = compute_transition_matrix(p_hat, N)
     grid = generate_grid(p_hat, N)
 
