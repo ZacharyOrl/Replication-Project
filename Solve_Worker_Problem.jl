@@ -1,12 +1,12 @@
 # Solves the decision problem, outputs results back to the sols structure. 
 function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
     @unpack_Model_Parameters para 
-    @unpack val_func, c_pol_func, H_pol_func, LTV_pol_func, FC_pol_func, α_pol_func, Move_pol_func, κ, σ_ω = sols
+    @unpack val_func, c_pol_func, H_pol_func, LTV_pol_func, FC_pol_func, α_pol_func, Move_pol_func, S_and_B_pol_func, κ, σ_ω = sols
     println("Solving the Worker's Problem")
 
     # Generate Transitory earnings grid based on σ_w of group
-    ω_grid::Vector{Float64} = rouwenhorst(σ_ω,0.0,g)[1] 
-    T_ω::Matrix{Float64} = rouwenhorst(σ_ω,0.0,g)[2]
+    ω_grid::Vector{Float64} = tauchen_hussey(0.0,sqrt(σ_ω),0.0,g)[1] 
+    T_ω::Matrix{Float64} = tauchen_hussey(0.0,sqrt(σ_ω),0.0,g)[2]
     nω::Int64 = length(ω_grid)
 
     println("Begin solving the model backwards")
@@ -15,19 +15,30 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
         println("Age is ", 25 - 50/T + (50/T)*j)
         
        # Generate interpolation functions for cash-on hand given each possible combination of the other states tomorrow 
-        interp_functions = Vector{Any}(undef, 2 * 2 * nη) 
+        interp_functions = Vector{Any}(undef, 2 * 2 * nη * nH) 
 
-        for Inv_Move_index in 1:2
-            for IFC_index in 1:2
-                for η_index in 1:nη
-                    # Compute linear index 
-                    index = lin[Inv_Move_index, IFC_index, η_index]
-                    # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
-                    interp_functions[index] =  bilinear_interp(val_func[Inv_Move_index, IFC_index, η_index, :, :, j+1], H_grid, X_grid)
-                   
+        for H_index = 1:nH
+            for Inv_Move_index = 1:2
+                for IFC_index = 1:2
+                    for η_index = 1:nη
+                        # Compute linear index 
+                        index = lin[Inv_Move_index, IFC_index, η_index, H_index]
+                        # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
+
+                        # Find the last index of X where the agent defaults 
+                        last_default_idx = findlast(x -> x == pun, val_func[Inv_Move_index, IFC_index, η_index, H_index, :, j+1])
+                        # if no default occurs, findlast returns `nothing`; convert that to 0
+                        last_default_idx = isnothing(last_default_idx) ? 1 : last_default_idx
+                        start = last_default_idx + 1
+
+                        if start < nX - 1 
+                            interp = interpolate( val_func[Inv_Move_index, IFC_index, η_index, H_index, start:nX, j+1], BSpline(Cubic()),OnGrid())
+                            interp_functions[index]        = extrapolate(interp, Interpolations.Flat())
+                        end
+                    end 
                 end
             end
-        end
+        end 
 
         # Loop over cash on hand states
         Threads.@threads for X_index in 1:nX
@@ -64,55 +75,100 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                     for FC_index = 1:2 
                                         FC = FC_grid[FC_index]
 
-                                        # Impose conditions 
+                                        # Loop over housing choices 
+                                        for H_prime_index in 2:nH # start from index 2 as index 1 is the 0 housing state. 
+                                            H_prime = H_grid[H_prime_index]
 
-                                        # If the agent has already entered the stock market, they won't do it again. 
-                                        if IFC == 1 && FC == 1
-                                            continue 
-                                        end 
-
-                                        # Not possible to have positive stock market share if not in the stock market. 
-                                        if IFC == 0 && FC == 0 && α > 0.0 
-                                            continue 
-                                        end 
-
-                                        # Debt and bills are perfect substitutes. 
-                                        # If in the market and if LTV is positive, α must be 1.0 
-                                        if α < 1.0 && LTV > 0.0 && (FC == 1 || IFC == 1)
-                                            continue 
-                                        end 
-
-                                        # If Inv_Move == 0 then the agent gets to optimize over moving versus not moving. 
-                                        if Inv_Move == 0 
-                                            H_prime,c,val = optimize_worker_eithermove(j,ω_grid, T_ω, nω, H, P, X, η_index,α, LTV, IFC,FC, κ, interp_functions, para)
-
-                                            # Record whether the agent's optimal choice is to move. 
-                                            if H_prime != H 
+                                             # Record whether the agent is moving
+                                             # and find maximum consumption 
+                                            if H_prime != H || Inv_Move == 1
                                                 Move = 1
+                                                c_max = X - FC*F - δ * P * H + LTV * P * H_prime + (1-λ)* P * H - P * H_prime
                                             else 
                                                 Move = 0
+                                                c_max = X - FC*F - δ * P * H + LTV * P * H_prime 
+                                            end  
+                                            
+                                            if c_max < 0 
+                                                continue 
                                             end 
-                                        end 
 
-                                        # If Inv_Mov == 1 then the agent must optimize conditional on moving only
-                                        if Inv_Move == 1 
-                                            H_prime,c,val = optimize_worker_move(j,ω_grid, T_ω, nω, H, P, X, η_index,α, LTV, IFC,FC, κ, interp_functions, para) 
+                                            # Loop over consumption share choices
+                                            for c_share_index in 1:nC 
+                                                c_share = ξ_shaped_grid[c_share_index]
 
-                                            Move = 1
-                                        end 
+                                                c = c_share * c_max 
 
-                                        # Update value function
-                                        if val > candidate_max 
-                                            val_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]     = val
+                                                # Impose conditions 
+                                                # If the agent has already entered the stock market, they won't do it again. 
+                                                if IFC == 1 && FC == 1
+                                                    continue 
+                                                end 
 
-                                            c_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = c 
-                                            H_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = H_prime
-                                            LTV_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = LTV
-                                            FC_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]  = FC
-                                            α_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = α
-                                            Move_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = Move
+                                                # Not possible to have positive stock market share if not in the stock market. 
+                                                if IFC == 0 && FC == 0 && α > 0.0 
+                                                    continue 
+                                                end 
 
-                                            candidate_max = val 
+                                                # Debt and bills are perfect substitutes. 
+                                                # If in the market and if LTV is positive, α must be 1.0 
+                                                if α < 1.0 && LTV > 0.0 && (FC == 1 || IFC == 1)
+                                                    continue 
+                                                end 
+
+                                                # Skip the initial housing state unless in the first period.                                               # Skip the first housing state unless in the first period 
+                                                if j != 1 && H == H_grid[1]
+                                                    val = pun
+                                                    continue 
+                                                end 
+
+                                                
+                                                # If in the first period, skip every other housing state
+                                                if j == 1 && H != H_grid[1]
+                                                    val = pun
+                                                    continue 
+                                                end 
+
+                                                # If Inv_Move == 0 then compute the value subject to the no move budget 
+                                                if Move == 0
+                                                    val = worker_value(j, ω_grid, T_ω, nω, H, P, X, η_index, c, 
+                                                                        α, H_prime_index, LTV, IFC, FC, κ, 
+                                                                        interp_functions, no_move_budget_constraint, para)
+                                                end 
+
+                                                # If Inv_Mov == 1 or the agent voluntarily moves, then compute the value subject to the move budget. 
+                                                if Move == 1
+                                                    val = worker_value(j, ω_grid, T_ω, nω, H, P, X, η_index, c, 
+                                                                        α, H_prime_index, LTV, IFC, FC, κ, 
+                                                                        interp_functions, move_budget_constraint, para)
+                                                end 
+     
+
+                                                # Update value function
+                                                if val > candidate_max 
+                                                    val_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]     = val
+                                                    #println("Value is: ", val)
+
+                                                    c_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = c 
+                                                    H_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = H_prime
+                                                    LTV_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = LTV
+                                                    FC_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]  = FC
+                                                    α_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = α
+                                                    Move_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j]   = Move
+
+                                                    if Move == 1
+                                                        S_and_B_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j] = move_budget_constraint(X, H, P, c, H_prime, LTV, FC, para)
+                                                    end 
+
+                                                    if Move == 0
+                                                        S_and_B_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j] = no_move_budget_constraint(X, H, P, c, H_prime, LTV, FC, para)
+                                                    end 
+
+                                                    #println( " X", X, " H ", H, " IFC ", IFC, " c " ,c," H_prime ",H_prime)
+
+                                                    candidate_max = val 
+                                                end 
+                                            end 
                                         end 
                                     end 
                                 end
@@ -137,13 +193,13 @@ end # T loop
 # 1. VALUE FUNCTION
 ###############################################################################
 function worker_value(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, nω::Int64, H::Float64, P::Float64, X::Float64,
-                       η_index::Int, c::Float64, α::Float64, H_prime::Float64,
+                       η_index::Int, c::Float64, α::Float64, H_prime_index::Int64,
                        LTV::Float64, IFC::Int, FC::Int,
                        κ::Matrix{Any}, interp_functions::Vector{Any},
                        constraint::Function, para::Model_Parameters)
 
     @unpack_Model_Parameters para 
-
+    H_prime = H_grid[H_prime_index]
     S_and_B = constraint(X, H, P, c, H_prime, LTV, FC, para)
 
     IFC_prime_index = max(IFC, FC) + 1          # 1 = no stock entry, 2 = entered
@@ -155,28 +211,28 @@ function worker_value(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, n
     val = flow_utility_func(c, H_prime, para)
 
     # labour‐income next period (κ holds exogenous paths)
+
+    # Compute highest/lowest continuation COH
     if j < TR
-        Y_prime_ub = κ[j + 1, 2] *exp(η_grid[3] + ω_grid[g])
-        Y_prime_lb = κ[j + 1, 2] *exp(η_grid[1] + ω_grid[1])
+        Y_prime_lb = κ[j + 1, 2] * exp(η_grid[1] + ω_grid[1])
     else 
-        Y_prime_ub = κ[j + 1, 2] 
         Y_prime_lb = κ[j + 1, 2] 
     end 
 
-    R_prime_max = exp(ι_grid[g] + μ)
     R_prime_min = exp(ι_grid[1]  + μ)
 
-    X_prime_ub  = R_prime_max * S + R_F * B - R_D * D + Y_prime_ub
     X_prime_lb  = R_prime_min * S + R_F * B - R_D * D + Y_prime_lb
 
-    if X_prime_lb < X_min || X_prime_ub > X_max || S_and_B < 0 || H_prime < H_min || H_prime > H_max
+    # Impose punishment continuation value for choices which 
+    # imply outside-grid COH states. 
+    if X_prime_lb < X_min ||  S_and_B < 0
         return  pun
     end
 
     # continuation value
     for η_prime_index in 1:nη
-        index_no_move = lin[1, IFC_prime_index, η_prime_index]
-        index_move    = lin[2, IFC_prime_index, η_prime_index]  
+        index_no_move = lin[1, IFC_prime_index, η_prime_index, H_prime_index]
+        index_move    = lin[2, IFC_prime_index, η_prime_index, H_prime_index]  
 
         for ω_prime_index in 1:nω
             # labour‐income next period (κ holds exogenous paths)
@@ -192,8 +248,8 @@ function worker_value(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, n
 
                 X_prime  = R_prime * S + R_F * B - R_D * D + Y_prime
 
-                v_no_move = interp_functions[index_no_move](H_prime, X_prime)
-                v_move    = interp_functions[index_move](H_prime, X_prime)
+                v_no_move = interp_functions[index_no_move](map_X(X_prime,para))
+                v_move    = interp_functions[index_move](map_X(X_prime,para))
 
                 val += β * T_η[η_index, η_prime_index] * T_ι[1, ι_prime_index] * T_ω[1, ω_prime_index] *
                         ((1 - π_m) * v_no_move + π_m * v_move)
@@ -204,134 +260,3 @@ function worker_value(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, n
     return val
 end
 
-###############################################################################
-# 2. NO-MOVE OPTIMISATION
-###############################################################################
-function optimize_worker_no_move(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, nω::Int64, H::Float64, P::Float64, X::Float64,
-                                  η_index::Int, α::Float64, LTV::Float64,
-                                  IFC::Int, FC::Int64, κ::Matrix{Any},
-                                  interp_functions::Vector{Any},
-                                  para::Model_Parameters)
-
-    @unpack_Model_Parameters para
-
-    H_prime = H
-
-    c_max = X - FC*F - δ * P * H + LTV * P * H
-
-    if c_max < 0 
-        return H, 0.0, pun
-    end
-
-    result = optimize(
-        c -> -worker_value(j,ω_grid, T_ω, nω, H, P, X, η_index, c, α, H_prime,
-                            LTV, IFC, FC, κ, interp_functions,
-                            no_move_budget_constraint, para),
-        0.0, c_max, Brent(); abs_tol = tol)
-
-    return H, Optim.minimizer(result), -Optim.minimum(result)
-end
-
-###############################################################################
-# 3. MOVE: INNER OPTIMISATION OVER c FOR A GIVEN H′
-###############################################################################
-function optimize_worker_c(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, nω::Int64, H::Float64, P::Float64, X::Float64, η_index::Int,
-                            α::Float64, H_prime::Float64, LTV::Float64, IFC::Int, FC::Int,
-                            κ::Matrix{Any}, interp_functions::Vector{Any},
-                            para::Model_Parameters)
-
-    @unpack_Model_Parameters para
-
-    c_max = X - FC*F - δ * P * H + LTV * P * H_prime + (1-λ)* P * H - P * H_prime
-    if c_max < 0 
-        return 0.0
-    end
-
-    result = optimize(
-        c -> -worker_value(j,ω_grid, T_ω, nω, H, P, X, η_index, c, α, H_prime,
-                            LTV, IFC, FC, κ, interp_functions,
-                            move_budget_constraint, para),
-        0.0, c_max, Brent(); abs_tol = tol)
-
-    return Optim.minimizer(result)
-end
-
-###############################################################################
-# 4. OBJECTIVE IN H′  (NESTED c SEARCH INSIDE)
-###############################################################################
-function objective_worker_H_prime(H_prime::Float64, j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, nω::Int64, H::Float64, P::Float64, X::Float64,
-                            η_index::Int, α::Float64, LTV::Float64, IFC::Int, FC::Int,
-                            κ::Matrix{Any}, interp_functions::Vector{Any},
-                            para::Model_Parameters)
-    @unpack_Model_Parameters para
-     
-    c_max = X - FC*F - δ * P * H + LTV * P * H_prime + (1-λ)* P * H - P * H_prime
-
-    if c_max < 0.0
-        c_star = 0.0
-    else 
-
-        c_star = optimize_worker_c(j,ω_grid, T_ω, nω, H, P, X, η_index, α, H_prime,
-                                LTV, IFC, FC, κ, interp_functions, para)
-    end
-
-    # Positive value returned ⇒ negate in the calling optimiser
-    return worker_value(j, ω_grid, T_ω, nω, H, P, X, η_index, c_star, α, H_prime,
-                         LTV, IFC, FC, κ, interp_functions,
-                         move_budget_constraint, para)
-end
-
-###############################################################################
-# 5. MOVE OPTIMISER (OUTER SEARCH OVER H′)
-###############################################################################
-function optimize_worker_move(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, nω::Int64, H::Float64, P::Float64, X::Float64,
-                               η_index::Int, α::Float64, LTV::Float64,
-                               IFC::Int, FC::Int, κ::Matrix{Any},
-                               interp_functions::Vector{Any},
-                               para::Model_Parameters)
-
-    @unpack_Model_Parameters para
-
-    H_m = 1/((1 - LTV)*P) * ( X - FC*F - δ * P * H + (1-λ)* P * H )
-
-    if H_m < H_min
-        return H_min,0.0,pun
-    end 
-
-    if H_m > H_max 
-        H_m = H_max 
-    end 
-
-    result = optimize(
-        H′ -> -objective_worker_H_prime(H′, j, ω_grid, T_ω, nω, H, P, X, η_index, α, LTV, IFC, FC,
-                                 κ, interp_functions, para),
-        H_min, H_m, Brent(); abs_tol = tol)
-
-    H_prime_opt = Optim.minimizer(result)
-    c_opt       = optimize_worker_c(j, ω_grid, T_ω, nω, H, P, X, η_index, α, H_prime_opt,
-                                     LTV, IFC, FC, κ, interp_functions, para)
-
-    return H_prime_opt, c_opt, -Optim.minimum(result)
-end
-
-###############################################################################
-# 6. CHOOSE BETWEEN MOVE & NO-MOVE
-###############################################################################
-function optimize_worker_eithermove(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, nω::Int64, H::Float64, P::Float64, X::Float64,
-                                     η_index::Int, α::Float64, LTV::Float64,
-                                     IFC::Int, FC::Int, κ::Matrix{Any},
-                                     interp_functions::Vector{Any},
-                                     para::Model_Parameters)
-
-    Hm, cm, Vm = optimize_worker_move(j, ω_grid, T_ω, nω, H, P, X, η_index, α, LTV,
-                                       IFC, FC, κ, interp_functions, para)
-
-    H0, c0, V0 = optimize_worker_no_move(j, ω_grid, T_ω, nω, H, P, X, η_index, α, LTV,
-                                          IFC, FC, κ, interp_functions, para)
-
-    if V0 > Vm 
-        return H0, c0, V0
-    else 
-        return Hm, cm, Vm
-    end 
-end

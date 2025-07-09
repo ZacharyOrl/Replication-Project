@@ -6,7 +6,7 @@ using Plots, CSV, DataFrames, Statistics
 indir_parameters = "parameters"
 cd(indir_parameters)
 
-simulated_data = DataFrame(CSV.File("simulations_panel_eyeballed_from_paper_no_hrisk.csv"))
+simulated_data = DataFrame(CSV.File("simulations_panel_cubic.csv"))
 simulated_data = simulated_data[simulated_data.cons .!=   0.0, :]
 
 # Liquid Assets 
@@ -67,7 +67,7 @@ colnames = [:liquid_under, :liquid_over,
             :financial_under, :financial_over,
             :total_under, :total_over]
 out_4 = DataFrame(Table_4,colnames)
-CSV.write("Table_4_estimates_no_hrisk.csv", 
+CSV.write("Table_4_estimates_cubic.csv", 
          out_4)
 ##################################################
 # Table 5. Portfolio composition over the lifecycle 
@@ -113,4 +113,8 @@ colnames = [:liquid_30orless, :liquid_35to45, :liquid_50to60, :liquid_65plus,
                     :total_30orless, :total_35to45, :total_50to60, :total_65plus]
 
 out_5 = DataFrame(Table_5,colnames)
-CSV.write("Table_5_estimates_no_hrisk.csv", out_5)
+CSV.write("Table_5_estimates_cubic.csv", out_5)
+####################
+# Check for overall stock market participation
+####################
+ mean(simulated_data.IFC_paid) # With cubic interpolation it was 63%
