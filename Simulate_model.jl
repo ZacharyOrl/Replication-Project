@@ -10,8 +10,8 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
     tot_sims = Int(round(S * wt_tot))
 
     # Generate Transitory earnings grid based on σ_w of group
-    ω_grid::Vector{Float64} = tauchen_hussey(0.0,σ_ω,0.0,g)[1] 
-    T_ω::Matrix{Float64} = tauchen_hussey(0.0,σ_ω,0.0,g)[2]
+    ω_grid::Vector{Float64} = tauchen_hussey(0.0,sqrt(σ_ω),0.0,g)[1] 
+    T_ω::Matrix{Float64} = tauchen_hussey(0.0,sqrt(σ_ω),0.0,g)[2]
     nω::Int64 = length(ω_grid)
 
     c_interp_functions, LTV_interp_functions, H_interp_functions, FC_interp_functions, α_interp_functions, Move_interp_functions = interpolate_policy_funcs(sols,para)
@@ -337,6 +337,11 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
                 # Compute wealth 
                 wealth[s,n] = stocks[s,n] + bonds[s,n] + P * housing[s,n] - debt[s,n]
 
+                if cash_on_hand[s,n] > X_max
+                    println(" X too high, Income is ",income[s,n], " cash on hand ",cash_on_hand[s,n], " bonds ", bonds[s,n-1], " stocks ", stocks[s,n-1])
+                end 
+
+
             end 
 
             # Simulate bequest
@@ -383,10 +388,26 @@ function sim_to_matrix(sim::Sim_Results)
 end
 
 # Round a value onto a grid 
+function round_to_grid(val, grid::AbstractVector)
+    k = searchsortedlast(grid, val)          # grid[k] ≤ val < grid[k+1]
+
+    if k == 0                                # below grid
+        return grid[1]
+    elseif k == length(grid)                 # above grid (or at the top knot)
+        return grid[end]
+    else
+        # pick the nearer of grid[k] and grid[k+1]
+        return (val - grid[k] < grid[k+1] - val) ? grid[k] : grid[k + 1]
+    end
+end
+#=
+# Round a value onto a grid 
 function round_to_grid(val, grid::Vector)
     k = searchsortedlast(grid, val)
     return grid[ max(k,1)]    # handles val below the grid
 end 
+=#
+
 
 # Same as the simulation except shocks are constant for cohorts in the same year. 
 # Essentially a repeat of simulate_model except the persistent shocks are not randomly drawn. 
@@ -394,8 +415,6 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
 
     @unpack ι_grid, η_grid,p_grid, H_grid, FC_grid, Move_grid, X_grid,  T_η, T_ι, nη, nH, π_η, T, TR, π_m, P_bar, b, μ, R_F, R_D, δ, λ, g, X_max, X_min, H_min, lin, wts = para
     @unpack val_func,c_pol_func, LTV_pol_func, H_pol_func, FC_pol_func, α_pol_func, Move_pol_func, κ, σ_ω = sols
-
-    (Random.seed!(123))
     
     # Set the number of simulations for this education group 
     wt_tot = sum(wts[:,edu])
@@ -501,13 +520,9 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
             LTV[s,1] = LTV_interp_functions[index,1](cash_on_hand[s,1])
 
             # Compute whether the agent moved - adjusting so it is on grid. 
-            moved[s,1] = round_to_grid(Move_interp_functions[index,1](cash_on_hand[s,1]), Move_grid)
-
-            if moved[s,1] == 0 
-                housing[s,1] = H 
-            else 
-                housing[s,1]  =  H_interp_functions[index,1](cash_on_hand[s,1])
-            end 
+            moved[s,1] = 1.0
+            housing[s,1]  =  round_to_grid(H_interp_functions[index,1](cash_on_hand[s,1]),H_grid[2:nH])
+            H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,1])
 
             if housing[s,1] < H_min
                     println(" X is ",cash_on_hand[s,1], " H is ",housing[s,1], " n is ",1)
@@ -527,11 +542,6 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
             IFC_paid[s,1] = IFC_prime_index - 1
 
             # Compute savings 
-
-            if moved[s,1] == 0 
-            S_and_B = no_move_budget_constraint(cash_on_hand[s,1], H, P, consumption[s,1], housing[s,1], 
-                                        LTV[s,1], stock_market_entry[s,1], para)
-            end 
 
             if moved[s,1] == 1 
                 S_and_B =   move_budget_constraint(cash_on_hand[s,1], H, P, consumption[s,1], housing[s,1], 
@@ -569,7 +579,7 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
 
                 # Turn the values of the choices last period to the states today.
                 H = housing[s,n-1]
-
+                H_index = H_prime_index 
                 IFC_index = IFC_prime_index
 
                 # Compute cash on hand 
@@ -591,16 +601,18 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
                 LTV[s,n] = LTV_interp_functions[index,n](cash_on_hand[s, n])
 
                 # Compute whether the agent moved - adjusting so it is on grid. 
-                moved[s,n] = round_to_grid(Move_interp_functions[index,n](cash_on_hand[s, n]))
+                moved[s,n] = round_to_grid(Move_interp_functions[index,n](cash_on_hand[s, n]), Move_grid)
 
                 if moved[s,n] == 0 
                     housing[s,n] = H 
+                    H_prime_index = H_index 
                 else 
-                    housing[s,n]  =  H_interp_functions[index,n](cash_on_hand[s, n])
+                    housing[s,n]  =  round_to_grid(H_interp_functions[index,n](cash_on_hand[s, n]), H_grid[2:nH])
+                    H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,n])
                 end 
 
                 # Need to adjust stock market entry so it is on the grid 
-                stock_market_entry[s,n] = round_to_grid(FC_interp_functions[index,n](cash_on_hand[s, n]))
+                stock_market_entry[s,n] = round_to_grid(FC_interp_functions[index,n](cash_on_hand[s, n]), FC_grid)
                 if stock_market_entry[s,n] == 0 && IFC_index == 1
                     stock_share[s,n] = 0.0
                 else 
@@ -653,6 +665,7 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
 
                 # Turn the choices last period to the states today.
                 H = housing[s, n-1]
+                H_index = H_prime_index 
 
                 IFC_index = IFC_prime_index
 
@@ -663,10 +676,13 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
                 expected_earnings[s,n] = expected_earnings_vals[n,η_index] 
 
                 cash_on_hand[s,n] = income[s,n] + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
-            
-                if cash_on_hand[s,n] > X_max
-                    println("Y",Y, " cash on hand ",cash_on_hand[s,n], " bonds ", bonds[s,n-1], " stocks ", stocks[s,n-1])
+                
+                if cash_on_hand[s,n]  > X_max
+                    println(" X too high, Income is ", income[s,n],
+                                " cash on hand ", cash_on_hand[s,n],
+                            " bonds ", bonds[s,n-1], " stocks ", stocks[s,n-1])
                 end 
+
                 # Overall index 
                 index = lin[Inv_Move_index, IFC_index, η_index, H_index]
 
@@ -675,16 +691,18 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
                 LTV[s,n] = LTV_interp_functions[index,n](cash_on_hand[s, n])
 
                 # Compute whether the agent moved - adjusting so it is on grid. 
-                moved[s,n] = round_to_grid(Move_interp_functions[index,n](cash_on_hand[s, n]))
+                moved[s,n] = round_to_grid(Move_interp_functions[index,n](cash_on_hand[s, n]), Move_grid)
 
                 if moved[s,n] == 0 
                     housing[s,n] = H 
+                    H_prime_index = H_index 
                 else 
-                    housing[s,n]  =  H_interp_functions[index,n](cash_on_hand[s, n])
+                    housing[s,n]  =  round_to_grid(H_interp_functions[index,n](cash_on_hand[s, n]), H_grid[2:nH])
+                    H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,n])
                 end 
 
                 # Need to adjust stock market entry so it is on the grid 
-                stock_market_entry[s,n] = round_to_grid(FC_interp_functions[index,n](cash_on_hand[s, n]))
+                stock_market_entry[s,n] = round_to_grid(FC_interp_functions[index,n](cash_on_hand[s, n]), FC_grid)
                 if stock_market_entry[s,n] == 0 && IFC_index == 1
                     stock_share[s,n] = 0.0
                 else 
@@ -717,11 +735,11 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
             end 
 
             # Simulate bequest
-            η_index = perm_dists[η_index] # Draw the new permanent component based upon the old one. 
+            # η_index = rand(perm_dists[1,1])   # No need to draw as bequest isn't an analysis object. 
             ι_index = rand(stock_dist)
 
             # Save values of shocks 
-            persistent[s,T+1] = η_grid[η_index]
+            persistent[s,T+1] = persistent[s,T]
             stock_market_shock[s,T+1] = ι_grid[ι_index]
 
             # Compute cash on hand 

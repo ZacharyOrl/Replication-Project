@@ -98,8 +98,8 @@ mat_clg  = sim_to_matrix(sim_clg)
 
 combined = vcat(mat_nhs, mat_hs, mat_clg)
 df = DataFrame(combined, cols)
-
-CSV.write("simulations_panel_cubic.csv", df)
+mean(df.IFC_paid)
+CSV.write("simulations_panel_update_3.csv", df)
 
 # Fixing η's path across simulations 
 mat_nhs_cons  = sim_to_matrix(sim_nhs_cons)
@@ -108,8 +108,8 @@ mat_clg_cons  = sim_to_matrix(sim_clg_cons)
 
 combined_cons = vcat(mat_nhs_cons, mat_hs_cons, mat_clg_cons)
 df_cons = DataFrame(combined_cons, cols)
-
-CSV.write("simulations_panel_cubic_cons.csv", df_cons)
+mean(df_cons.IFC_paid)
+CSV.write("simulations_panel_update_3.csv", df_cons)
 #########################################
 # Checks
 #########################################
@@ -123,35 +123,41 @@ age_grid = collect(range(start_age, length = 10, stop = end_age))
 
 
 # Value function across X
-plot(sols_nhs.val_func[1,1,1,1,10:nX,9])
+plot(sols_nhs.val_func[:,1,1,9,10:nX,2]')
 plot!(sols_nhs.val_func[2,1,1,10,:,10])
 
 # Consumption
-plot(X_grid,sols_nhs.c_pol_func[1,1,1,1,:,9:10])
+plot(X_grid[1:20],sols_nhs.c_pol_func[1,1,1,2,1:20,10], title = "Effect of SMP on Consumption/Saving is Het. in COH", label = "Unpaid, T = 10 H = 20K")
+plot!(X_grid[1:20],sols_nhs.c_pol_func[1,2,1,2,1:20,10], label = "Paid", xlabel = "COH")
 plot!(sols.c_pol_func[2,1,1,1,:,1])
 
 # Housing 
-plot(X_grid,H_pol_func[1,1,2,2,:,2:10])
+plot(X_grid,H_pol_func[:,1,1,8,:,10]')
 
 plot!(H_pol_func[2,1,1,5,:,10])
 
 # Moving 
-plot(X_grid,Move_pol_func[1,1,2,3,:,9])
+plot(X_grid,Move_pol_func[:,1,1,8,:,10]')
 
 # Debt 
-plot(X_grid, LTV_pol_func[1,1,1,2,:,2])
+plot(X_grid, LTV_pol_func[1,1,1:3,8,:,2]')
 plot!(X_grid,α_pol_func[1,2,1,1,:,7]) 
 
 plot!(sols.D_pol_func[2,1,1,:,:,10])
 
 # Stock share
-plot(X_grid, sols_nhs.α_pol_func[1,1,1,1,:,1])
-plot(1.5 .* LTV_pol_func[1,1,2,3,:,9] .* H_pol_func[1,1,2,3,:,9]) 
-plot!(α_pol_func[1,1,2,3,:,9] .* S_and_B_pol_func[1,1,2,3,:,9]) 
-plot!((1 .-α_pol_func[1,1,1,2,:,10]) .* S_and_B_pol_func[1,1,1,1,:,10]) 
+plot(X_grid[1:20], sols_nhs.α_pol_func[1,1,2,2,1:20,2],title = "Impact of Housing on Portfolio Choice: T = 2", label = L"H = $20K", xlabel = L"COH ($)", ylabel = "Stock Share")
+plot!(X_grid[1:20], sols_nhs.α_pol_func[1,1,2,3,1:20,2], label = L"H = $36K")
+plot!(X_grid[1:20], sols_nhs.α_pol_func[1,1,2,6,1:20,2], label = L"H = $135K")
 
+savefig("Stock share policy function_F1K.png")
 # Stock market entry payment 
-plot(X_grid, FC_pol_func[1,1,1,1,:,:], xlabel = "COH") 
+plot(X_grid[1:50], FC_pol_func[1,1,1,2,1:50,2], xlabel = L"COH ($)") 
+plot!(X_grid[1:50], FC_pol_func[1,1,1,2,1:50,10], xlabel = L"COH ($)") 
+
+plot(X_grid[1:50], H_pol_func[1,1,1,2,1:50,2], xlabel = L"COH ($)") 
+plot!(X_grid[1:50], H_pol_func[1,1,1,2,1:50,8], xlabel = L"COH ($)") 
+
 
 # CHeck constraints
 v = sols.val_func[1,2,1,1,3,10]
@@ -203,25 +209,25 @@ end
 # Check simulation 
 ############################
 @unpack_Model_Parameters para 
-@unpack val_func, c_pol_func, H_pol_func, LTV_pol_func, FC_pol_func, α_pol_func, κ, σ_ω = sols_clg
+@unpack val_func, c_pol_func, H_pol_func, LTV_pol_func, FC_pol_func, α_pol_func, κ, σ_ω = sols_nhs
 start_age = 25 
 end_age = 70
 
 age_grid = collect(range(start_age, length = 10, stop = end_age))
-uage = sort(unique(sim_clg.age))
+uage = sort(unique(sim_nhs.age))
 
-consumption_path = Dict(a => mean(sim_clg.consumption[sim_clg.age .== a]) for a in uage)
-cash_on_hand_path =  Dict(a => mean(sim_clg.cash_on_hand[sim_clg.age .== a]) for a in uage)
-wealth_path = Dict(a => mean(sim_clg.wealth[sim_clg.age .== a]) for a in uage)
-stock_path = Dict(a => mean(sim_clg.stocks[sim_clg.age .== a]) for a in uage)
-stock_share_path = Dict(a => mean(sim_clg.stock_share[sim_clg.age .== a]) for a in uage)
-bond_path = Dict(a => mean(sim_clg.bonds[sim_clg.age .== a]) for a in uage)
-LTV_path = Dict(a => mean(sim_clg.LTV[sim_clg.age .== a]) for a in uage)
-debt_path = Dict(a => mean(sim_clg.debt[sim_clg.age .== a]) for a in uage)
-housing_path = Dict(a => mean(sim_clg.housing[sim_clg.age .== a]) for a in uage)
-stock_market_entry_path = Dict(a => mean(sim_clg.IFC_paid[sim_clg.age .== a]) for a in uage)
-moved_path = Dict(a => mean(sim_clg.moved[sim_clg.age .== a]) for a in uage)
-income_path =  Dict(a => mean(sim_clg.income[sim_clg.age .== a]) for a in uage)
+consumption_path = Dict(a => mean(sim_nhs.consumption[sim_nhs.age .== a]) for a in uage)
+cash_on_hand_path =  Dict(a => mean(sim_nhs.cash_on_hand[sim_nhs.age .== a]) for a in uage)
+wealth_path = Dict(a => mean(sim_nhs.wealth[sim_nhs.age .== a]) for a in uage)
+stock_path = Dict(a => mean(sim_nhs.stocks[sim_nhs.age .== a]) for a in uage)
+stock_share_path = Dict(a => mean(sim_nhs.stock_share[sim_nhs.age .== a]) for a in uage)
+bond_path = Dict(a => mean(sim_nhs.bonds[sim_nhs.age .== a]) for a in uage)
+LTV_path = Dict(a => mean(sim_nhs.LTV[sim_nhs.age .== a]) for a in uage)
+debt_path = Dict(a => mean(sim_nhs.debt[sim_nhs.age .== a]) for a in uage)
+housing_path = Dict(a => mean(sim_nhs.housing[sim_nhs.age .== a]) for a in uage)
+stock_market_entry_path = Dict(a => mean(sim_nhs.IFC_paid[sim_nhs.age .== a]) for a in uage)
+moved_path = Dict(a => mean(sim_nhs.moved[sim_nhs.age .== a]) for a in uage)
+income_path =  Dict(a => mean(sim_nhs.income[sim_nhs.age .== a]) for a in uage)
 
 plot(consumption_path)
 plot(cash_on_hand_path)
@@ -236,9 +242,9 @@ plot(moved_path)
 plot(income_path)
 plot!(consumption_path)
 
-histogram(sim_clg.cash_on_hand)
+histogram(sim_nhs.cash_on_hand)
 histogram!(sim_hs.cash_on_hand)
-histogram(sim_hs.housing)
+histogram(sim_nhs.housing)
 histogram(sim_nhs.bonds)
 histogram(sim_nhs.debt)
 histogram(sim_nhs.stocks)

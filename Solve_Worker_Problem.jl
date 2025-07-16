@@ -25,16 +25,9 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                         index = lin[Inv_Move_index, IFC_index, η_index, H_index]
                         # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
 
-                        # Find the last index of X where the agent defaults 
-                        last_default_idx = findlast(x -> x == pun, val_func[Inv_Move_index, IFC_index, η_index, H_index, :, j+1])
-                        # if no default occurs, findlast returns `nothing`; convert that to 0
-                        last_default_idx = isnothing(last_default_idx) ? 1 : last_default_idx
-                        start = last_default_idx + 1
+                        interp = interpolate( val_func[Inv_Move_index, IFC_index, η_index, H_index, :, j+1], BSpline(Linear()),OnGrid())
+                        interp_functions[index]        = extrapolate(interp, Interpolations.Flat())
 
-                        if start < nX - 1 
-                            interp = interpolate( val_func[Inv_Move_index, IFC_index, η_index, H_index, start:nX, j+1], BSpline(Cubic()),OnGrid())
-                            interp_functions[index]        = extrapolate(interp, Interpolations.Flat())
-                        end
                     end 
                 end
             end
@@ -236,7 +229,7 @@ function worker_value(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, n
 
         for ω_prime_index in 1:nω
             # labour‐income next period (κ holds exogenous paths)
-            if j < TR
+            if j < TR - 1
                 Y_prime = κ[j + 1, 2] * exp(η_grid[η_prime_index] + ω_grid[ω_prime_index])
             else 
                 Y_prime = κ[j + 1, 2] 

@@ -18,7 +18,7 @@
     κ_ω::Float64 = 0.00             # Correlation between house prices and transitory component
     ρ_ϵ_ι::Float64 = 0.0            # Correlation between aggregae component of income and the stock market
     φ::Float64 = 0.748^5            # Persistence in the aggregate component - obtained by monte carlo simulation. 
-    σ_η::Float64 = ann_var * (1 + 0.748 + 0.748^2 + 0.748^4 + 0.748^6 + 0.748^8) * (1 - 0.748^2)  
+    σ_η::Float64 = ann_var 
     κ_η::Float64 = sqrt(σ_η/σ_p)    # Regression coefficient of cyclical fluctuations in house prices on aggregate component (correlation is 1)
 
     # One time stock market entry cost 
@@ -65,7 +65,7 @@
     nι::Int64 = g
 
     # Housing grids
-    p_grid::Vector{Float64} = (1 / κ_η) .* η_grid
+    p_grid::Vector{Float64} = zeros(3) #(1 / κ_η) .* η_grid
     P_bar::Float64 = 1 # Initial Price 
     np::Int64 = nη
 
@@ -75,21 +75,21 @@
     # State / Choice Grids    
 
     # Agents start life with no housing and are forced to purchase a home in the first period. 
-    H_min::Float64 = 20000.0
-    H_max::Float64 = 200000.0
-    nH::Int64 = 8
+    H_min::Float64 = 20000
+    H_max::Float64 = 300000.0
+    nH::Int64 = 11
 
     H_grid::Vector{Float64} = vcat(0.0, collect(range(H_min, length = nH - 1, stop = H_max)))
 
     # The minimum level of cash on hand one can sustain. 
-    X_min::Float64 = -10000.0
-    X_max::Float64 =  1500000.0
-    nX::Int64 = 101
+    X_min::Float64 = -100000.0
+    X_max::Float64 =  2900000.0
+    nX::Int64 = 100
     X_grid::Vector{Float64} = collect(range(X_min, length = nX, stop = X_max))
 
     α_min::Float64 = 0.0
     α_max::Float64 = 1.0
-    nα::Int64 = 8
+    nα::Int64 = 10
     α_grid::Vector{Float64} = collect(range(α_min, length = nα, stop = α_max))
 
     # The investor's loan-to-home value ratio. 
@@ -101,7 +101,7 @@
     # The investor's consumption share of their total resources
     C_share_min::Float64 = 0.0001
     C_share_max::Float64 = 1.00
-    nC::Int64 = 102
+    nC::Int64 = 120
     ν               = 1.0      # Adjust this curvature parameter: ν > 1 → more points near minc
     ξ_grid          = range(C_share_min, C_share_max, length = nC)
     ξ_shaped_grid   = [ξ^ν for ξ in ξ_grid]

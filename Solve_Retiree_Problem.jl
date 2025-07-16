@@ -23,17 +23,9 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                         # Compute linear index 
                         index = lin[Inv_Move_index, IFC_index, η_index, H_index]
                         # Access val_func with dimensions [Inv_Move, IFC, η, H, X, j]
+                        interp = interpolate( val_func[Inv_Move_index, IFC_index, η_index, H_index, :, j+1], BSpline(Linear()),OnGrid())
+                        interp_functions[index]        = extrapolate(interp, Interpolations.Flat())
 
-                        # Find the last index of X where the agent defaults 
-                        last_default_idx = findlast(x -> x == pun, val_func[Inv_Move_index, IFC_index, η_index, H_index, :, j+1])
-                        # if no default occurs, findlast returns `nothing`; convert that to 0
-                        last_default_idx = isnothing(last_default_idx) ? 1 : last_default_idx
-                        start = last_default_idx + 1
-
-                        if start < nX - 1 
-                            interp = interpolate( val_func[Inv_Move_index, IFC_index, η_index, H_index, start:nX, j+1], BSpline(Cubic()),OnGrid())
-                            interp_functions[index]        = extrapolate(interp, Interpolations.Flat())
-                        end 
                     end
                 end
             end
@@ -212,8 +204,6 @@ function retiree_value(j::Int, H::Float64, P::Float64, X::Float64,
     # labour‐income next period (κ holds exogenous paths)
     
     Y_prime = κ[j + 1, 2]
-
-    R_prime_max = exp(ι_grid[g] + μ)
     R_prime_min = exp(ι_grid[1]  + μ)
 
     X_prime_lb  = R_prime_min * S + R_F * B - R_D * D + Y_prime
