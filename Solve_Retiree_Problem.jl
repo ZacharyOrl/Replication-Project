@@ -154,8 +154,6 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
                                                         S_and_B_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j] = no_move_budget_constraint(X, H, P, c, H_prime, LTV, FC, para)
                                                     end 
 
-                                                    #println( " X", X, " H ", H, " IFC ", IFC, " c " ,c," H_prime ",H_prime)
-
                                                     candidate_max = val 
                                                 end 
                                             end # C share loop

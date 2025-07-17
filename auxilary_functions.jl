@@ -6,13 +6,17 @@
 # 2: The budget constraint, conditional on not moving 
 # 3: The budget constraint, conditional on moving 
 # 4: The value of bequest 
-# 5: Bilinear Interpolation function 
-# 6: Bilinear Interpolation function, applied to the policy functions and allowing for linear extrapolation. 
-# 7: The expected value of future labor earnings in each state. 
-# 8: The time series of shocks for each age cohort ( age is as of 1989 as per Cocco)
-# 9: Each agent has a full simulated lifecycle in simulations. I pull only a single "age" from each lifecycle according to Cocco's weights.
-# 10: Compounds an annual rate over T periods. 
-# 11: Computes the stationary distribution of a Markov chain. 
+
+# 5: The expected value of future labor earnings in each state (for the simulation)
+# 6: The time series of shocks for each age cohort ( age is as of 1989 as per Cocco)
+# 7: Each agent has a full simulated lifecycle in simulations. I pull only a single "age" from each lifecycle according to Cocco's weights.
+# 8: Compounds an annual gross rate over T periods. 
+
+# 9: Computes the stationary distribution of a Markov chain. 
+# 10: A function which map cash-in-hand values for interpolation (taken from Campbell - Clara - Cocco , 2020)
+# 11: A function which rounds cash-in-hand values to the cash-in-hand grid for the simulation (taken from Campbell - Clara - Cocco, 2020)
+# 12: Helper function which combines the output of a simulation run. 
+
 #############################################################################################
 # 1.
 #############################################################################################
@@ -86,47 +90,6 @@ function compute_bequest_value(V::Array{Float64,5}, para::Model_Parameters)
     return V
 end 
 
-#############################################################################################
-# 6. Interpolate the policy functions after solving the Model
-# Allows for extrapolation as some rounding is necessary
-# (due to moving and stock market entry being discrete).
-#############################################################################################
-function interpolate_policy_funcs(sols::Solutions,para::Model_Parameters)
-    @unpack_Model_Parameters para 
-    @unpack val_func,c_pol_func, LTV_pol_func, H_pol_func, FC_pol_func, α_pol_func, Move_pol_func = sols
-
-       # Generate interpolation functions for cash-on hand given each possible combination of the other states
-       c_interp_functions = Array{Any}(undef, 2 * 2 * nη * nH ,T)
-       LTV_interp_functions = Array{Any}(undef, 2 * 2 * nη * nH ,T) 
-       H_interp_functions = Array{Any}(undef, 2 * 2 * nη * nH ,T) 
-       FC_interp_functions = Array{Any}(undef, 2 * 2 * nη * nH,T) 
-       α_interp_functions = Array{Any}(undef, 2 * 2 * nη * nH ,T) 
-       Move_interp_functions = Array{Any}(undef, 2 * 2 * nη * nH,T) 
-
-        for n = 1:T
-            for H_index = 1:nH
-                for Inv_Move_index in 1:2
-                    for IFC_index in 1:2
-                        for η_index in 1:nη
-
-                        # Compute linear index 
-                        index = lin[Inv_Move_index, IFC_index, η_index, H_index]
-
-                        # Create interpolated policy functions
-                        c_interp_functions[index,n]     = Spline1D(X_grid,c_pol_func[Inv_Move_index, IFC_index, η_index, H_index, :, n], k = 1)
-                        LTV_interp_functions[index,n]   = x -> clamp(Spline1D(X_grid,LTV_pol_func[Inv_Move_index, IFC_index, η_index, H_index, :, n],k = 1)(x),0.0,0.85)
-                        H_interp_functions[index,n]     = Spline1D(X_grid,H_pol_func[Inv_Move_index, IFC_index, η_index, H_index, :, n], k = 1)
-                        FC_interp_functions[index,n]    = Spline1D(X_grid,FC_pol_func[Inv_Move_index, IFC_index, η_index, H_index, :, n], k = 1)
-                        α_interp_functions[index,n]     = x -> clamp(Spline1D(X_grid,α_pol_func[Inv_Move_index, IFC_index, η_index, H_index, :, n], k = 1)(x),0.0,1.0)
-                        Move_interp_functions[index,n]  = x -> clamp(Spline1D(X_grid,Move_pol_func[Inv_Move_index, IFC_index, η_index, H_index, :, n], k = 1)(x),0.0,1.0)
-                        end
-                    end
-                end
-            end
-        end
-
-    return c_interp_functions, LTV_interp_functions, H_interp_functions, FC_interp_functions, α_interp_functions, Move_interp_functions
-end 
 
 #############################################################################################
 # 7. Compute future expected earnings for each aggregate state and age . 
@@ -244,108 +207,9 @@ function stationary_distribution(η_grid::Vector{Float64},T_η::Matrix{Float64};
     Stationary_Distribution = [ state_counts[η_grid[s]] / T for s in 1:nη ]
     return Stationary_Distribution
 end 
-
 #############################################################################################
-# 11.  Discrete Choice Routine
+# 12.  Maps an X value for interpolation 
 #############################################################################################
-#=
-function discrete_choice_routine(T::Int64,c::Float64, LTV::Float64, X::Float64, H::Float64, P::Float64, index::Int64,
-                                H_interp_functions::Array{Any}, Move_interp_functions::Array{Any},FC_interp_functions::Array{Any},para::Model_Parameters)
-    @unpack_Model_Parameters para
-
-    # Compute the unadjusted policies 
-    moved = Move_interp_functions[index,T](X)
-    housing = H_interp_functions[index,T](X)
-    stock_market_entry = FC_interp_functions[index,T](X)
-
-    # 8 possible rounding combinations 
-    # But you don't need to round housing if 
-    # Rounding not needed for moving and stock market entry implies no problem 
-    if round(moved) == moved && round(stock_market_entry) == stock_market_entry 
-        if moved == 0 
-            H_out = H 
-        else 
-            H_out = housing 
-        end 
-
-        return moved, H_out ,stock_market_entry 
-    end 
-
-    # Rounding only need for stock market entry - 
-    # randomize entry, subject to satisfying the budget constraint 
-    if round(moved) == moved && round(stock_market_entry) != stock_market_entry 
-
-        if moved == 0 
-            H_out = H 
-
-            if rand() > stock_market_entry && no_move_budget_constraint(X,H,P,c,H_out,LTV,1,para) > 0.0
-                stock_market_entry = 1
-            else 
-                stock_market_entry = 0 
-            end  
-
-        else 
-            H_out = housing 
-
-            if rand() > stock_market_entry && move_budget_constraint(X,H,P,c,H_out,LTV,1,para) > 0.0
-                stock_market_entry = 1
-            else 
-                stock_market_entry = 0 
-            end  
-        end 
-
-
-        return moved, H_out,stock_market_entry 
-    end 
-
-    # Rounding needed for moving but not stock market entry and not for the housing value conditional on moving
-    if round(moved) != moved && round(stock_market_entry) == stock_market_entry && typeof(findfirst(==(housing),H_grid)) != Nothing
-        
-        if rand() > moved && move_budget_constraint(X,H,P,c,housing,LTV,stock_market_entry,para) > 0.0
-            moved_out = 1 
-        else 
-
-        # Rounding needed for housing 
-        if typeof(findfirst(==(housing),H_grid)) == Nothing
-
-            # Choose between the two closest values of the first feasible housing gridpoint that is not ordered 
-            # after "housing"
-            k = searchsortedlast(H_grid[2:nH], housing)
-            H_choice_low = H_grid[k]
-            H_choice_high = H_grid[k+1]
-
-            # Rounding needed for stock market entry 
-            if round(stock_market_entry) != stock_market_entry
-                
-                
-                S_and_B_1 = no_move_budget_constraint(X, H, P, c, H, 
-                                        LTV, stock_market_entry, para)
-
-
-                if moved[s,n] == 0 
-                    housing[s,n] = H 
-                    H_prime_index = H_index
-                else 
-                    housing[s,n]  =  round_to_grid(H_interp_functions[index,n](cash_on_hand[s, n]), H_grid[2:nH])
-                    H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,n])
-                end 
-
-                # Need to adjust stock market entry so it is on the grid 
-                stock_market_entry[s,n] = round_to_grid(FC_interp_functions[index,n](cash_on_hand[s, n]), FC_grid)
-
-                # Compute savings 
-                if moved[s,n] == 0 
-                    S_and_B = no_move_budget_constraint(cash_on_hand[s,n], H, P, consumption[s,n], housing[s,n], 
-                                        LTV[s,n], stock_market_entry[s,n], para)
-                end 
-
-                if moved[s,n] == 1 
-                    S_and_B =   move_budget_constraint(cash_on_hand[s,n], H, P, consumption[s,n], housing[s,n], 
-                                        LTV[s,n], stock_market_entry[s,n], para)
-    end 
-end 
-
-=#
 
 function map_X(value::Float64, para::Model_Parameters)
     @unpack_Model_Parameters para
@@ -354,4 +218,48 @@ function map_X(value::Float64, para::Model_Parameters)
     step = (X_max - X_min) / (n - 1)
     idx  = (value - X_min) / step + 1
     return clamp(idx, 1, n)
+end
+#############################################################################################
+# 12.  # Round a value onto a grid (for the simulation)
+#############################################################################################
+
+# Closest 
+function round_to_grid(val, grid::AbstractVector)
+    k = searchsortedlast(grid, val)          # grid[k] ≤ val < grid[k+1]
+
+    if k == 0                                # below grid
+        return grid[1]
+    elseif k == length(grid)                 # above grid (or at the top knot)
+        return grid[end]
+    else
+        # pick the nearer of grid[k] and grid[k+1]
+        return (val - grid[k] < grid[k+1] - val) ? grid[k] : grid[k + 1]
+    end
+end
+
+# Round down 
+#=
+# Round a value onto a grid 
+function round_to_grid(val, grid::Vector)
+    k = searchsortedlast(grid, val)
+    return grid[ max(k,1)]    # handles val below the grid
+end 
+=#
+
+#############################################################################################
+# 13: Small helper function which combines the outputs of a simulation run 
+#############################################################################################
+function sim_to_matrix(sim::Sim_Results)
+
+    return hcat(
+        sim.bonds,           sim.stocks,            sim.stock_share,
+        sim.stock_market_entry,                     sim.IFC_paid,       
+        sim.housing,         sim.moved,             sim.Inv_Move_shock,
+        sim.cash_on_hand,    sim.expected_earnings,
+        sim.debt,            sim.LTV,               sim.consumption,       
+        sim.wealth,          sim.bequest,           sim.income,                       
+        sim.persistent,      sim.transitory,        sim.stock_market_shock,
+        sim.age,     sim.education
+        )           
+    
 end

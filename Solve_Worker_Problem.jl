@@ -122,14 +122,14 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                                     continue 
                                                 end 
 
-                                                # If Inv_Move == 0 then compute the value subject to the no move budget 
+                                                # If Move == 0 then compute the value subject to the no move budget 
                                                 if Move == 0
                                                     val = worker_value(j, ω_grid, T_ω, nω, H, P, X, η_index, c, 
                                                                         α, H_prime_index, LTV, IFC, FC, κ, 
                                                                         interp_functions, no_move_budget_constraint, para)
                                                 end 
 
-                                                # If Inv_Mov == 1 or the agent voluntarily moves, then compute the value subject to the move budget. 
+                                                # If Move == 1, then compute the value subject to the move budget. 
                                                 if Move == 1
                                                     val = worker_value(j, ω_grid, T_ω, nω, H, P, X, η_index, c, 
                                                                         α, H_prime_index, LTV, IFC, FC, κ, 
@@ -156,8 +156,6 @@ function Solve_Worker_Problem(para::Model_Parameters, sols::Solutions)
                                                     if Move == 0
                                                         S_and_B_pol_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j] = no_move_budget_constraint(X, H, P, c, H_prime, LTV, FC, para)
                                                     end 
-
-                                                    #println( " X", X, " H ", H, " IFC ", IFC, " c " ,c," H_prime ",H_prime)
 
                                                     candidate_max = val 
                                                 end 
@@ -206,7 +204,7 @@ function worker_value(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, n
     # labour‐income next period (κ holds exogenous paths)
 
     # Compute highest/lowest continuation COH
-    if j < TR
+    if j < TR - 1
         Y_prime_lb = κ[j + 1, 2] * exp(η_grid[1] + ω_grid[1])
     else 
         Y_prime_lb = κ[j + 1, 2] 

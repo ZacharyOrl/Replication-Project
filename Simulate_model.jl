@@ -14,7 +14,6 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
     T_ω::Matrix{Float64} = tauchen_hussey(0.0,sqrt(σ_ω),0.0,g)[2]
     nω::Int64 = length(ω_grid)
 
-    c_interp_functions, LTV_interp_functions, H_interp_functions, FC_interp_functions, α_interp_functions, Move_interp_functions = interpolate_policy_funcs(sols,para)
     expected_earnings_vals =  compute_expected_earnings(ω_grid,T_ω,κ, para)
 
     # Distribution over the transitory component (use that it isn't persistent, so won't vary over time)
@@ -65,7 +64,7 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
         stop = Int(sim_start + round(S*wts[a,edu]) - 1) 
         
          for s = sim_start: stop
-            count = 0
+
             η_index = rand(initial_dist) # Draw the initial aggregate state from its stationary distribution 
             ι_index = rand(stock_dist)
             ω_index   = rand(transitory_dist)
@@ -94,42 +93,31 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
             IFC_index = 1
 
             income[s,1] = κ[1,2] * exp(η_grid[η_index] + ω_grid[ω_index])
-            cash_on_hand[s,1]   = 0.0 + income[s,1]
 
-            if cash_on_hand[s,1] > X_max
+            X   = 0.0 + income[s,1]
+            cash_on_hand[s,1] = round_to_grid(X, X_grid)
+            X_index =  searchsortedlast(X_grid, cash_on_hand[s,1])
+
+            # Check 
+            if X > X_max
                 println(cash_on_hand[s,1])
             end 
+
             # This is purely an input into the budget constraint and so is not saved.
             H = H_grid[H_index]
 
-            # Overall index 
-            index = lin[Inv_Move_index, IFC_index, η_index, H_index]
-
             # Compute choices 
-            consumption[s,1] = c_interp_functions[index,1](cash_on_hand[s,1])
-            LTV[s,1] = LTV_interp_functions[index,1](cash_on_hand[s,1])
+            consumption[s,1] = c_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+            LTV[s,1] = LTV_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
 
             # Compute whether the agent moved - adjusting so it is on grid. 
             moved[s,1] = 1.0
 
-            housing[s,1]  =  round_to_grid(H_interp_functions[index,1](cash_on_hand[s,1]), H_grid[2:nH])
-
+            housing[s,1]  =  H_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
             H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,1])
 
-            if housing[s,1] < H_min
-                    println(" H too low, X is ",cash_on_hand[s,1], " H is ",housing[s,1], " n is ",1)
-            end 
-
-            # Need to adjust stock market entry so it is on the grid 
-            stock_market_entry[s,1] = round_to_grid(FC_interp_functions[index,1](cash_on_hand[s,1]), FC_grid)
-            if round_to_grid(FC_interp_functions[index,1](cash_on_hand[s,1]), FC_grid) != FC_interp_functions[index,1](cash_on_hand[s,1])
-                    count += 1
-            end 
-            if stock_market_entry[s,1] == 0 && IFC_index == 1
-                stock_share[s,1] = 0.0
-            else 
-                stock_share[s,1] = α_interp_functions[index,1](cash_on_hand[s,1])
-            end 
+            stock_market_entry[s,1] = FC_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+            stock_share[s,1] = α_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
     
             # Find next period's indices
             IFC_prime_index = max(stock_market_entry[s,1],IFC_index - 1) + 1
@@ -182,48 +170,28 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
                 income[s,n] = κ[n,2] * exp( η_grid[η_index] + ω_grid[ω_index])
                 expected_earnings[s,n] = expected_earnings_vals[n,η_index] 
 
-                cash_on_hand[s,n] = income[s,n] + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
-
-                if H < H_min
-                    println(" H too low, X is ",cash_on_hand[s,n], " H is ",housing[s,n-1], " n is ",n)
-                end 
-                # Overall index 
-                index = lin[Inv_Move_index, IFC_index, η_index, H_index]
+                X = income[s,n] + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
+                cash_on_hand[s,n] = round_to_grid(X,X_grid)
+                X_index =  searchsortedlast(X_grid, cash_on_hand[s,n])
 
                 # Compute choices 
-                consumption[s,n] = c_interp_functions[index,n](cash_on_hand[s, n])
-                LTV[s,n] = LTV_interp_functions[index,n](cash_on_hand[s, n])
+                consumption[s,n] = c_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                LTV[s,n] = LTV_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                moved[s,n] = Move_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
 
-                # Compute whether the agent moved - adjusting so it is on grid. 
-                moved[s,n] = round_to_grid(Move_interp_functions[index,n](cash_on_hand[s, n]), Move_grid)
-                
-                 
-                if round_to_grid(Move_interp_functions[index,n](cash_on_hand[s, n]), Move_grid) != Move_interp_functions[index,n](cash_on_hand[s, n])
-                    count += 1
-                end 
-                if moved[s,n] == 0 
-                    housing[s,n] = H 
-                    H_prime_index = H_index
-                else 
-                    housing[s,n]  =  round_to_grid(H_interp_functions[index,n](cash_on_hand[s, n]), H_grid[2:nH])
-                    if round_to_grid(H_interp_functions[index,n](cash_on_hand[s, n]), H_grid) != H_interp_functions[index,n](cash_on_hand[s, n])
-                        count += 1
-                    end 
-                    H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,n])
-                end 
+                housing[s,n]  =  H_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                H_prime_index = searchsortedlast(H_grid, housing[s,n])
 
                 # Need to adjust stock market entry so it is on the grid 
-                stock_market_entry[s,n] = round_to_grid(FC_interp_functions[index,n](cash_on_hand[s, n]), FC_grid)
-                if round_to_grid(FC_interp_functions[index,n](cash_on_hand[s,n]), FC_grid) != FC_interp_functions[index,n](cash_on_hand[s,n])
-                    count += 1
+                stock_market_entry[s,n] = FC_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+
+                stock_share[s,n] = α_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                
+                # Make sure no investors are entering the stock market without paying the fee  
+                if  stock_market_entry[s,n] == 0 && IFC_paid[s,n-1] == 0 && stock_share[s,n] > 0 
+                    println("Error in stock choice")
                 end 
 
-                if stock_market_entry[s,n] == 0 && IFC_index == 1
-                    stock_share[s,n] = 0.0
-                else 
-                    stock_share[s,n] = α_interp_functions[index,n](cash_on_hand[s, n])
-                end 
-    
                 # Find next period's indices
                 IFC_prime_index = max(stock_market_entry[s,n],IFC_index - 1) + 1
                 IFC_paid[s,n] = IFC_prime_index - 1
@@ -278,42 +246,28 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
                 P = P_bar * exp(b * (n) + p_grid[η_index])
                 R_S = exp(stock_market_shock[s,n] + μ)
                 income[s,n] = κ[n,2]
-                expected_earnings[s,n] = expected_earnings_vals[n,η_index] 
+                expected_earnings[s,n] = expected_earnings_vals[n,η_index]
 
-                cash_on_hand[s,n] = income[s,n] + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
-            
-                if cash_on_hand[s,n] > X_max
+                X = income[s,n] + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
+                cash_on_hand[s,n] = round_to_grid(X,X_grid)
+                X_index =  searchsortedlast(X_grid, cash_on_hand[s,n])
+                
+                # Check 
+                if X > X_max
                     println(" X too high, Income is ",income[s,n], " cash on hand ",cash_on_hand[s,n], " bonds ", bonds[s,n-1], " stocks ", stocks[s,n-1])
                 end 
 
-                # Overall index 
-                index = lin[Inv_Move_index, IFC_index, η_index, H_index]
-
                 # Compute choices 
-                consumption[s,n] = c_interp_functions[index,n](cash_on_hand[s, n])
-                LTV[s,n] = LTV_interp_functions[index,n](cash_on_hand[s, n])
+                consumption[s,n] = c_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                LTV[s,n] = LTV_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
 
-                # Compute whether the agent moved - adjusting so it is on grid. 
-                moved[s,n] = round_to_grid(Move_interp_functions[index,n](cash_on_hand[s, n]), Move_grid)
-                if round_to_grid(Move_interp_functions[index,n](cash_on_hand[s,n]), Move_grid) != Move_interp_functions[index,n](cash_on_hand[s,n])
-                    count += 1
-                end 
-                if moved[s,n] == 0 
-                    housing[s,n] = H 
-                    H_prime_index = H_index
-                else 
-                    housing[s,n]  =  round_to_grid(H_interp_functions[index,n](cash_on_hand[s, n]), H_grid[2:nH])
-                    H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,n])
-                end 
+                moved[s,n] = Move_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                housing[s,n]  =  H_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                H_prime_index = searchsortedlast(H_grid, housing[s,n])
 
-                # Need to adjust stock market entry so it is on the grid 
-                stock_market_entry[s,n] = round_to_grid(FC_interp_functions[index,n](cash_on_hand[s, n]), FC_grid)
-                if stock_market_entry[s,n] == 0 && IFC_index == 1
-                    stock_share[s,n] = 0.0
-                else 
-                    stock_share[s,n] = α_interp_functions[index,n](cash_on_hand[s, n])
-                end 
-    
+                stock_market_entry[s,n] = FC_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                stock_share[s,n] = α_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+
                 # Find next period's indices
                 IFC_prime_index = max(stock_market_entry[s,n],IFC_index - 1) + 1
                 IFC_paid[s,n] = IFC_prime_index - 1
@@ -337,7 +291,8 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
                 # Compute wealth 
                 wealth[s,n] = stocks[s,n] + bonds[s,n] + P * housing[s,n] - debt[s,n]
 
-                if cash_on_hand[s,n] > X_max
+                # Check to see if 
+                if X > X_max
                     println(" X too high, Income is ",income[s,n], " cash on hand ",cash_on_hand[s,n], " bonds ", bonds[s,n-1], " stocks ", stocks[s,n-1])
                 end 
 
@@ -355,7 +310,8 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
             # Compute cash on hand 
             P = P_bar * exp(b * (T+1) + p_grid[η_index])
             R_S = exp(stock_market_shock[s,T+1] + μ)
-            cash_on_hand[s,T+1] = R_S * stocks[s,T] + R_F * bonds[s,T] - R_D * debt[s,T]
+            X = R_S * stocks[s,T] + R_F * bonds[s,T] - R_D * debt[s,T]
+            cash_on_hand[s,T+1] = round_to_grid(X,X_grid)
             
             # Agents are forced to sell their house when they die
             bequest[s] = cash_on_hand[s,T+1] - δ * housing[s,T] * P +  (1-λ) *  P * housing[s,T]    
@@ -371,43 +327,6 @@ function simulate_model(para,sols,S::Int64, edu::Int64)
         filter_age(persistent,age), filter_age(transitory,age), filter_age(stock_market_shock,age), 
         age, filter_age(education,age))
 end
-
-function sim_to_matrix(sim::Sim_Results)
-
-    return hcat(
-        sim.bonds,           sim.stocks,            sim.stock_share,
-        sim.stock_market_entry,                     sim.IFC_paid,       
-        sim.housing,         sim.moved,             sim.Inv_Move_shock,
-        sim.cash_on_hand,    sim.expected_earnings,
-        sim.debt,            sim.LTV,               sim.consumption,       
-        sim.wealth,          sim.bequest,           sim.income,                       
-        sim.persistent,      sim.transitory,        sim.stock_market_shock,
-        sim.age,     sim.education
-        )           
-    
-end
-
-# Round a value onto a grid 
-function round_to_grid(val, grid::AbstractVector)
-    k = searchsortedlast(grid, val)          # grid[k] ≤ val < grid[k+1]
-
-    if k == 0                                # below grid
-        return grid[1]
-    elseif k == length(grid)                 # above grid (or at the top knot)
-        return grid[end]
-    else
-        # pick the nearer of grid[k] and grid[k+1]
-        return (val - grid[k] < grid[k+1] - val) ? grid[k] : grid[k + 1]
-    end
-end
-#=
-# Round a value onto a grid 
-function round_to_grid(val, grid::Vector)
-    k = searchsortedlast(grid, val)
-    return grid[ max(k,1)]    # handles val below the grid
-end 
-=#
-
 
 # Same as the simulation except shocks are constant for cohorts in the same year. 
 # Essentially a repeat of simulate_model except the persistent shocks are not randomly drawn. 
@@ -425,7 +344,6 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
     T_ω::Matrix{Float64} = tauchen_hussey(0.0,σ_ω,0.0,g)[2]
     nω::Int64 = length(ω_grid)
 
-    c_interp_functions, LTV_interp_functions, H_interp_functions, FC_interp_functions, α_interp_functions, Move_interp_functions = interpolate_policy_funcs(sols,para)
     expected_earnings_vals =  compute_expected_earnings(ω_grid,T_ω,κ, para)
     # Education group
 
@@ -504,38 +422,30 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
             IFC_index = 1
 
             income[s,1] = κ[1,2] * exp(η_grid[η_index] + ω_grid[ω_index])
-            cash_on_hand[s,1]   = 0.0 + income[s,1]
+            X   = 0.0 + income[s,1]
+            cash_on_hand[s,1] = round_to_grid(X, X_grid)
+            X_index =  searchsortedlast(X_grid, cash_on_hand[s,1])
 
-            if cash_on_hand[s,1] > X_max
+            # Check 
+            if X > X_max
                 println(cash_on_hand[s,1])
             end 
+
             # This is purely an input into the budget constraint and so is not saved.
             H = H_grid[H_index]
 
-            # Overall index 
-            index = lin[Inv_Move_index, IFC_index, η_index, H_index]
-
             # Compute choices 
-            consumption[s,1] = c_interp_functions[index,1](cash_on_hand[s,1])
-            LTV[s,1] = LTV_interp_functions[index,1](cash_on_hand[s,1])
+            consumption[s,1] = c_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+            LTV[s,1] = LTV_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
 
             # Compute whether the agent moved - adjusting so it is on grid. 
             moved[s,1] = 1.0
-            housing[s,1]  =  round_to_grid(H_interp_functions[index,1](cash_on_hand[s,1]),H_grid[2:nH])
+
+            housing[s,1]  =  H_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
             H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,1])
 
-            if housing[s,1] < H_min
-                    println(" X is ",cash_on_hand[s,1], " H is ",housing[s,1], " n is ",1)
-            end 
-
-            # Need to adjust stock market entry so it is on the grid 
-            stock_market_entry[s,1] = round_to_grid(FC_interp_functions[index,1](cash_on_hand[s,1]), FC_grid)
-            
-            if stock_market_entry[s,1] == 0 && IFC_index == 1
-                stock_share[s,1] = 0.0
-            else 
-                stock_share[s,1] = α_interp_functions[index,1](cash_on_hand[s,1])
-            end 
+            stock_market_entry[s,1] = FC_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+            stock_share[s,1] = α_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
     
             # Find next period's indices
             IFC_prime_index = max(stock_market_entry[s,1],IFC_index - 1) + 1
@@ -588,35 +498,26 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
                 income[s,n] = κ[n,2] * exp( η_grid[η_index] + ω_grid[ω_index])
                 expected_earnings[s,n] = expected_earnings_vals[n,η_index] 
 
-                cash_on_hand[s,n] = income[s,n] + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
-
-                if H < H_min
-                    println(" X is ",cash_on_hand[s,n], " H is ",housing[s,n-1], " n is ",n)
-                end 
-                # Overall index 
-                index = lin[Inv_Move_index, IFC_index, η_index, H_index]
+                X = income[s,n] + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
+                cash_on_hand[s,n] = round_to_grid(X,X_grid)
+                X_index =  searchsortedlast(X_grid, cash_on_hand[s,n])
 
                 # Compute choices 
-                consumption[s,n] = c_interp_functions[index,n](cash_on_hand[s, n])
-                LTV[s,n] = LTV_interp_functions[index,n](cash_on_hand[s, n])
+                consumption[s,n] = c_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                LTV[s,n] = LTV_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                moved[s,n] = Move_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
 
-                # Compute whether the agent moved - adjusting so it is on grid. 
-                moved[s,n] = round_to_grid(Move_interp_functions[index,n](cash_on_hand[s, n]), Move_grid)
-
-                if moved[s,n] == 0 
-                    housing[s,n] = H 
-                    H_prime_index = H_index 
-                else 
-                    housing[s,n]  =  round_to_grid(H_interp_functions[index,n](cash_on_hand[s, n]), H_grid[2:nH])
-                    H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,n])
-                end 
+                housing[s,n]  =  H_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                H_prime_index = searchsortedlast(H_grid, housing[s,n])
 
                 # Need to adjust stock market entry so it is on the grid 
-                stock_market_entry[s,n] = round_to_grid(FC_interp_functions[index,n](cash_on_hand[s, n]), FC_grid)
-                if stock_market_entry[s,n] == 0 && IFC_index == 1
-                    stock_share[s,n] = 0.0
-                else 
-                    stock_share[s,n] = α_interp_functions[index,n](cash_on_hand[s, n])
+                stock_market_entry[s,n] = FC_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+
+                stock_share[s,n] = α_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                
+                # Make sure no investors are entering the stock market without paying the fee  
+                if  stock_market_entry[s,n] == 0 && IFC_paid[s,n-1] == 0 && stock_share[s,n] > 0 
+                    println("Error in stock choice")
                 end 
     
                 # Find next period's indices
@@ -674,40 +575,26 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
                 R_S = exp(stock_market_shock[s,n] + μ)
                 income[s,n] = κ[n,2]
                 expected_earnings[s,n] = expected_earnings_vals[n,η_index] 
-
-                cash_on_hand[s,n] = income[s,n] + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
                 
-                if cash_on_hand[s,n]  > X_max
-                    println(" X too high, Income is ", income[s,n],
-                                " cash on hand ", cash_on_hand[s,n],
-                            " bonds ", bonds[s,n-1], " stocks ", stocks[s,n-1])
+                X = income[s,n] + R_S * stocks[s,n-1] + R_F * bonds[s,n-1] - R_D * debt[s,n-1]
+                cash_on_hand[s,n] = round_to_grid(X,X_grid)
+                X_index =  searchsortedlast(X_grid, cash_on_hand[s,n])
+                
+                # Check 
+                if X > X_max
+                    println(" X too high, Income is ",income[s,n], " cash on hand ",cash_on_hand[s,n], " bonds ", bonds[s,n-1], " stocks ", stocks[s,n-1])
                 end 
-
-                # Overall index 
-                index = lin[Inv_Move_index, IFC_index, η_index, H_index]
 
                 # Compute choices 
-                consumption[s,n] = c_interp_functions[index,n](cash_on_hand[s, n])
-                LTV[s,n] = LTV_interp_functions[index,n](cash_on_hand[s, n])
+                consumption[s,n] = c_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                LTV[s,n] = LTV_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
 
-                # Compute whether the agent moved - adjusting so it is on grid. 
-                moved[s,n] = round_to_grid(Move_interp_functions[index,n](cash_on_hand[s, n]), Move_grid)
+                moved[s,n] = Move_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                housing[s,n]  =  H_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                H_prime_index = searchsortedlast(H_grid, housing[s,n])
 
-                if moved[s,n] == 0 
-                    housing[s,n] = H 
-                    H_prime_index = H_index 
-                else 
-                    housing[s,n]  =  round_to_grid(H_interp_functions[index,n](cash_on_hand[s, n]), H_grid[2:nH])
-                    H_prime_index = searchsortedlast(H_grid[1:nH], housing[s,n])
-                end 
-
-                # Need to adjust stock market entry so it is on the grid 
-                stock_market_entry[s,n] = round_to_grid(FC_interp_functions[index,n](cash_on_hand[s, n]), FC_grid)
-                if stock_market_entry[s,n] == 0 && IFC_index == 1
-                    stock_share[s,n] = 0.0
-                else 
-                    stock_share[s,n] = α_interp_functions[index,n](cash_on_hand[s, n])
-                end 
+                stock_market_entry[s,n] = FC_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
+                stock_share[s,n] = α_pol_func[Inv_Move_index, IFC_index, η_index, H_index, X_index, n]
     
                 # Find next period's indices
                 IFC_prime_index = max(stock_market_entry[s,n],IFC_index - 1) + 1
@@ -745,7 +632,9 @@ function simulate_model_constant_shocks(para,sols,S::Int64, edu::Int64)
             # Compute cash on hand 
             P = P_bar * exp(b * (T+1) + p_grid[η_index])
             R_S = exp(stock_market_shock[s,T+1] + μ)
-            cash_on_hand[s,T+1] = R_S * stocks[s,T] + R_F * bonds[s,T] - R_D * debt[s,T]
+
+            X = R_S * stocks[s,T] + R_F * bonds[s,T] - R_D * debt[s,T]
+            cash_on_hand[s,T+1] = round_to_grid(X,X_grid)
             
             # Agents are forced to sell their house when they die
             bequest[s] = cash_on_hand[s,T+1] - δ * housing[s,T] * P +  (1-λ) *  P * housing[s,T]    

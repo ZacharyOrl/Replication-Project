@@ -99,7 +99,8 @@ mat_clg  = sim_to_matrix(sim_clg)
 combined = vcat(mat_nhs, mat_hs, mat_clg)
 df = DataFrame(combined, cols)
 mean(df.IFC_paid)
-CSV.write("simulations_panel_update_3.csv", df)
+
+CSV.write("simulations_panel_update_5.csv", df)
 
 # Fixing η's path across simulations 
 mat_nhs_cons  = sim_to_matrix(sim_nhs_cons)
@@ -109,7 +110,7 @@ mat_clg_cons  = sim_to_matrix(sim_clg_cons)
 combined_cons = vcat(mat_nhs_cons, mat_hs_cons, mat_clg_cons)
 df_cons = DataFrame(combined_cons, cols)
 mean(df_cons.IFC_paid)
-CSV.write("simulations_panel_update_3.csv", df_cons)
+CSV.write("simulations_panel_update_5.csv", df_cons)
 #########################################
 # Checks
 #########################################
@@ -123,11 +124,11 @@ age_grid = collect(range(start_age, length = 10, stop = end_age))
 
 
 # Value function across X
-plot(sols_nhs.val_func[:,1,1,9,10:nX,2]')
+plot(sols_nhs.val_func[:,1,1,2,19:nX,2]')
 plot!(sols_nhs.val_func[2,1,1,10,:,10])
 
 # Consumption
-plot(X_grid[1:20],sols_nhs.c_pol_func[1,1,1,2,1:20,10], title = "Effect of SMP on Consumption/Saving is Het. in COH", label = "Unpaid, T = 10 H = 20K")
+plot(X_grid[10:nX],sols_nhs.c_pol_func[1,1,1,2,10:nX,9], title = "Effect of SMP on Consumption/Saving is Het. in COH", label = "Unpaid, T = 10 H = 20K")
 plot!(X_grid[1:20],sols_nhs.c_pol_func[1,2,1,2,1:20,10], label = "Paid", xlabel = "COH")
 plot!(sols.c_pol_func[2,1,1,1,:,1])
 
@@ -137,131 +138,120 @@ plot(X_grid,H_pol_func[:,1,1,8,:,10]')
 plot!(H_pol_func[2,1,1,5,:,10])
 
 # Moving 
-plot(X_grid,Move_pol_func[:,1,1,8,:,10]')
+plot(X_grid,Move_pol_func[:,1,1,2,:,2]')
 
 # Debt 
 plot(X_grid, LTV_pol_func[1,1,1:3,8,:,2]')
-plot!(X_grid,α_pol_func[1,2,1,1,:,7]) 
-
-plot!(sols.D_pol_func[2,1,1,:,:,10])
 
 # Stock share
-plot(X_grid[1:20], sols_nhs.α_pol_func[1,1,2,2,1:20,2],title = "Impact of Housing on Portfolio Choice: T = 2", label = L"H = $20K", xlabel = L"COH ($)", ylabel = "Stock Share")
+plot(X_grid, sols_nhs.α_pol_func[1,1,2,2,:,2],title = "Impact of Housing on Portfolio Choice: T = 2", label = L"H = $20K", xlabel = L"COH ($)", ylabel = "Stock Share")
 plot!(X_grid[1:20], sols_nhs.α_pol_func[1,1,2,3,1:20,2], label = L"H = $36K")
-plot!(X_grid[1:20], sols_nhs.α_pol_func[1,1,2,6,1:20,2], label = L"H = $135K")
+plot!(X_grid[1:20], sols_nhs.α_pol_func[1,1,2,,1:20,2], label = L"H = $135K")
 
 savefig("Stock share policy function_F1K.png")
 # Stock market entry payment 
-plot(X_grid[1:50], FC_pol_func[1,1,1,2,1:50,2], xlabel = L"COH ($)") 
-plot!(X_grid[1:50], FC_pol_func[1,1,1,2,1:50,10], xlabel = L"COH ($)") 
+plot(X_grid[1:30], FC_pol_func[1,1,1,1,1:30,1], xlabel = L"COH ($)") 
+plot!(X_grid[1:30], FC_pol_func[1,1,1,3,1:30,10], xlabel = L"COH ($)") 
 
 plot(X_grid[1:50], H_pol_func[1,1,1,2,1:50,2], xlabel = L"COH ($)") 
 plot!(X_grid[1:50], H_pol_func[1,1,1,2,1:50,8], xlabel = L"COH ($)") 
 
-
-# CHeck constraints
-v = sols.val_func[1,2,1,1,3,10]
-D = sols.D_pol_func[1,2,1,1,3,10]
-c = sols.c_pol_func[1,2,1,1,3,10]
-FC = Int64(sols.FC_pol_func[1,2,1,1,3,10])
-α = sols.α_pol_func[1,2,1,1,3,10]
-H_prime = sols.H_pol_func[1,2,1,1,3,10]
-H_prime_index = 1
-# Compute X_prime
-j = 10
-X = X_grid[3]
-H = H_grid[1]
-Inv_Move = 0
-η_index = 1
-IFC_index = 2
-IFC = IFC_grid[IFC_index]
-
-P = 1 * exp(b * (j-1) + p_grid[η_index])
-
-# S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
-budget_constraint(X, H, P, Inv_Move,c, H_prime, D, FC, para)
-debt_constraint(D , H_prime, P, para)
-find_zero(c -> budget_constraint(X, H, P, Inv_Move,c, H_prime, D, FC, para), 100.0)
-sols.val_func[9,2,2,1,1,1]
-R_prime = exp(ι_prime + μ)
-Y_Prime = κ[j, 2]
-
-S = α * S_and_B
-B = (1-α) * S_and_B
-# Compute next period's liquid wealth
-X_prime = R_prime * S + R_F * B - R_D * D + Y_Prime
-
-P =  P_bar * exp(b * (10-1) + p_grid[η_index])
-X = X_grid[1]
-S_and_B  = budget_constraint(X, H, P, Inv_Move, c, H_prime, D, FC, para)
-
-Y = zeros(10,1000)
-
-for s = 1:1000
-    for j = 1:10
-    ω = rand(ω_grid)
-    η = rand(η_grid)
-    Y[j,s] = κ[j+1, 2] * exp(ω + η)
-    end 
-end 
-
 ############################
 # Check simulation 
 ############################
-@unpack_Model_Parameters para 
-@unpack val_func, c_pol_func, H_pol_func, LTV_pol_func, FC_pol_func, α_pol_func, κ, σ_ω = sols_nhs
+cd("/home/z/zorlando/Replication/Plots")
 start_age = 25 
 end_age = 70
 
 age_grid = collect(range(start_age, length = 10, stop = end_age))
-uage = sort(unique(sim_nhs.age))
+uage = sort(unique(df.age))
 
-consumption_path = Dict(a => mean(sim_nhs.consumption[sim_nhs.age .== a]) for a in uage)
-cash_on_hand_path =  Dict(a => mean(sim_nhs.cash_on_hand[sim_nhs.age .== a]) for a in uage)
-wealth_path = Dict(a => mean(sim_nhs.wealth[sim_nhs.age .== a]) for a in uage)
-stock_path = Dict(a => mean(sim_nhs.stocks[sim_nhs.age .== a]) for a in uage)
-stock_share_path = Dict(a => mean(sim_nhs.stock_share[sim_nhs.age .== a]) for a in uage)
-bond_path = Dict(a => mean(sim_nhs.bonds[sim_nhs.age .== a]) for a in uage)
-LTV_path = Dict(a => mean(sim_nhs.LTV[sim_nhs.age .== a]) for a in uage)
-debt_path = Dict(a => mean(sim_nhs.debt[sim_nhs.age .== a]) for a in uage)
-housing_path = Dict(a => mean(sim_nhs.housing[sim_nhs.age .== a]) for a in uage)
-stock_market_entry_path = Dict(a => mean(sim_nhs.IFC_paid[sim_nhs.age .== a]) for a in uage)
-moved_path = Dict(a => mean(sim_nhs.moved[sim_nhs.age .== a]) for a in uage)
-income_path =  Dict(a => mean(sim_nhs.income[sim_nhs.age .== a]) for a in uage)
+consumption_path_mean = Dict(a => mean(df.cons[df.age .== a]) for a in uage)
+consumption_path_med = Dict(a => median(df.cons[df.age .== a]) for a in uage)
 
-plot(consumption_path)
-plot(cash_on_hand_path)
-plot(wealth_path)
-plot(stock_path)
-plot(bond_path)
-plot(debt_path)
-plot(LTV_path)
-plot(housing_path)
-plot(stock_market_entry_path)
-plot(moved_path)
-plot(income_path)
-plot!(consumption_path)
+cash_on_hand_path =  Dict(a => mean(df.cash[df.age .== a]) for a in uage)
+wealth_path = Dict(a => mean(df.wealth[df.age .== a]) for a in uage)
 
-histogram(sim_nhs.cash_on_hand)
-histogram!(sim_hs.cash_on_hand)
-histogram(sim_nhs.housing)
-histogram(sim_nhs.bonds)
-histogram(sim_nhs.debt)
-histogram(sim_nhs.stocks)
+stock_path_med = Dict(a => median(df.stocks[df.age .== a]) for a in uage)
+stock_path_mean = Dict(a => mean(df.stocks[df.age .== a]) for a in uage)
+stock_share_path = Dict(a => median(df.stock_share[df.age .== a]) for a in uage)
 
-histogram(sim_nhs.cash_on_hand)
-histogram(sim_nhs.stocks[:,1])
-histogram(sim_nhs.stock_market_entry[:,1])
-histogram(sim_nhs.bequest)
-histogram(sim_nhs.stocks .+ sim_nhs.bonds)
+bond_path = Dict(a => mean(df.bonds[df.age .== a]) for a in uage)
 
-# Stocks check 
-# Does anyone enter the stock market while holding 0 stocks? 
-stocks_chk = sim_nhs.stocks[:,1]
-stocks_entry_chk = sim_nhs.stock_market_entry[:,1]
-no_stocks = ifelse.(stocks_chk .== 0.0, stocks_entry_chk, missing)
+LTV_path = Dict(a => mean(df.LTV[df.age .== a]) for a in uage)
+debt_path_mean = Dict(a => mean(df.debt[df.age .== a]) for a in uage)
+debt_path_med = Dict(a => median(df.debt[df.age .== a]) for a in uage)
 
-plot(sim_nhs.housing[1:5,:])
-histogram(filtered)
+housing_path_mean = Dict(a => mean(df.housing[df.age .== a]) for a in uage)
+housing_path_med = Dict(a => median(df.housing[df.age .== a]) for a in uage)
 
-Threads.nthreads()
+stock_market_entry_path = Dict(a => mean(df.IFC_paid[df.age .== a]) for a in uage)
+moved_path = Dict(a => mean(df.moved[df.age .== a]) for a in uage[2:10])
+income_path =  Dict(a => mean(df.income[df.age .== a]) for a in uage)
+
+# Plot Paths
+# Consumption
+plot(consumption_path_mean, xlabel = "Period", ylabel = "Dollars", title = "Consumption by Age", label = "Mean")
+plot!(consumption_path_med, xlabel = "Period", ylabel = "Dollars", title = "Consumption by Age", label = "Median")
+savefig("Consumption_Path_update_5.png")
+
+# Cash on Hand
+plot(cash_on_hand_path, xlabel = "Period", ylabel = "Dollars", title = "Mean Cash by Age", label = "")
+savefig("Cash_Path_update_5.png")
+
+# Wealth
+plot(wealth_path, xlabel = "Period", ylabel = "Dollars", title = "Mean Wealth by Age", label = "")
+savefig("Wealth_Path_update_5.png")
+
+# Stock Path
+plot(stock_path_mean, xlabel = "Period", ylabel = "Dollars", title = "Stocks by Age", label = "Mean")
+plot!(stock_path_med, xlabel = "Period", ylabel = "Dollars", label = "Median")
+savefig("Stock_Path_update_5.png")
+
+# Bonds
+plot(bond_path, xlabel = "Period", ylabel = "Dollars", title = "Mean Bonds by Age", label = "")
+savefig("Bond_Path_update_5.png")
+
+# Debt Path
+plot(debt_path_mean, xlabel = "Period", ylabel = "Dollars", title = "Debt by Age", label = "Mean")
+plot!(debt_path_med, xlabel = "Period", ylabel = "Dollars", title = "Debt by Age", label = "Median")
+savefig("Debt_Path_update_5.png")
+
+# LTV Path
+plot(LTV_path, xlabel = "Period", ylabel = "Dollars", title = "Mean LTV Ratio by Age", label = "")
+savefig("LTV_Path_update_5.png")
+
+# Housing Path
+plot(housing_path_mean, xlabel = "Period", ylabel = "Dollars", title = "Housing by Age", label = "Mean")
+plot!(housing_path_med, xlabel = "Period", ylabel = "Dollars", title = "Housing by Age", label = "Median")
+
+savefig("Housing_Path_update_5.png")
+
+# Stock Market Entry Path
+plot(stock_market_entry_path, xlabel = "Period", ylabel = "Fraction", title = "Stock Market Participation by Age", label = "")
+savefig("SMP_update_5.png")
+
+# Proportion Moving
+plot(moved_path, xlabel = "Period", ylabel = "Fraction", title = "Proportion Moving by Age", label = "")
+savefig("Moving_Path_update_5.png")
+
+# Income vs Consumption
+plot(income_path, xlabel = "Period", ylabel = "Dollars", title = "", label = "Mean Income")
+plot!(consumption_path_mean, xlabel = "Period", ylabel = "Dollars", label = "Mean Consumption")
+savefig("Income_Consumption_Path_update_5.png")
+
+# Cash on hand histogram
+histogram(df.cash, xlabel = "Period", ylabel = "Dollars", title = "Cash Distribution", label = "")
+savefig("Cash_Histogram_update_5.png")
+
+# Housing Histogram 
+histogram(df.housing, xlabel = "Period", ylabel = "Dollars", title = "Housing Distribution", label = "")
+savefig("Housing_Histogram_update_5.png")
+
+# Stocks Histogram 
+histogram(df.stocks, xlabel = "Period", ylabel = "Dollars", title = "Stocks Distribution", label = "")
+savefig("Stocks_Histogram_update_5.png")
+
+# Consumption histogram 
+histogram(df.cons, xlabel = "Period", ylabel = "Dollars", title = "Consumption Distribution", label = "")
+savefig("Consumption_Histogram_update_5.png")
