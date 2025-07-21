@@ -32,7 +32,7 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
         end 
 
         # Loop over cash on hand states
-        @Threads.threads for X_index = 1:nX
+        Threads.@threads for X_index = 1:nX
             X = X_grid[X_index]
 
             # Loop over housing states
@@ -103,7 +103,6 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
 
                                                 # Skip the first housing state unless in the first period 
                                                 if j != 1 && H == H_grid[1]
-                                                    val_func[ Inv_Move_index, IFC_index, η_index, H_index, X_index, j] = pun
                                                     continue 
                                                 end 
 
@@ -122,6 +121,7 @@ function Solve_Retiree_Problem(para::Model_Parameters, sols::Solutions)
 
                                                 # If Inv_Mov == 1 or the agent voluntarily moves, then compute the value subject to the move budget. 
                                                 if Move == 1
+
                                                     val = retiree_value(j, H, P, X, η_index, c, 
                                                                         α, H_prime_index, LTV, IFC, FC, κ, 
                                                                        interp_functions, move_budget_constraint, para)
@@ -205,8 +205,8 @@ function retiree_value(j::Int, H::Float64, P::Float64, X::Float64,
     R_prime_min = exp(ι_grid[1]  + μ)
 
     X_prime_lb  = R_prime_min * S + R_F * B - R_D * D + Y_prime
-
-    if X_prime_lb < X_min || S_and_B < 0 
+    
+    if X_prime_lb < X_min
         return pun
     else 
     

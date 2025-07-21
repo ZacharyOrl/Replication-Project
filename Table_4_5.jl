@@ -6,7 +6,7 @@ using Plots, CSV, DataFrames, Statistics
 indir_parameters = "parameters"
 cd(indir_parameters)
 
-simulated_data = DataFrame(CSV.File("simulations_panel_cubic.csv"))
+simulated_data = DataFrame(CSV.File("simulations_panel_update_5.csv"))
 simulated_data = simulated_data[simulated_data.cons .!=   0.0, :]
 
 # Liquid Assets 
@@ -32,20 +32,27 @@ function compute_stats_Table4(df::DataFrame,group::String, greater_or_less::Int6
     else 
         assets_filtered_dataset =  df[simulated_data[!,"net_worth"]  .>= 100000, :]
     end 
+    
+    stock_shr = replace(
+        assets_filtered_dataset.stocks ./ assets_filtered_dataset[!, group],
+        NaN => 0.0,             # 0 % stocks when the denominator is 0
+    )
+    bills_shr = replace(
+        assets_filtered_dataset.bonds  ./ assets_filtered_dataset[!, group],
+        NaN => 1.0,             # 100 % bonds when the denominator is 0
+    )
 
-    stock_shr = assets_filtered_dataset.stocks ./(assets_filtered_dataset[!,group] )
-    bills_shr = assets_filtered_dataset.bonds ./(assets_filtered_dataset[!,group] )
     real_est_shr = assets_filtered_dataset.real_estate ./(assets_filtered_dataset[!,group] )
     human_cap_shr = assets_filtered_dataset.expected_earnings ./(assets_filtered_dataset[!,group] )
     stock_participation = assets_filtered_dataset.IFC_paid
     debt_shr = assets_filtered_dataset.debt ./ (assets_filtered_dataset[!,group] )
 
-    st = mean(stock_shr)
-    bi = mean(bills_shr)
-    re = mean(real_est_shr)
-    hc = mean(human_cap_shr)
+    st = mean(filter(!isnan, stock_shr))
+    bi = mean(filter(!isnan, bills_shr))
+    re = mean(filter(!isnan, real_est_shr))
+    hc = mean(filter(!isnan, human_cap_shr))
     part = mean(stock_participation)
-    dt = mean(debt_shr)
+    dt = mean(filter(!isnan, debt_shr))
 
     return vcat(st, bi , re , hc, part, dt)
 end
@@ -67,7 +74,7 @@ colnames = [:liquid_under, :liquid_over,
             :financial_under, :financial_over,
             :total_under, :total_over]
 out_4 = DataFrame(Table_4,colnames)
-CSV.write("Table_4_estimates_cubic.csv", 
+CSV.write("Table_4_estimates_update_3_no_hrisk_rndnrst.csv", 
          out_4)
 ##################################################
 # Table 5. Portfolio composition over the lifecycle 
@@ -78,19 +85,26 @@ function compute_stats_Table5(df::DataFrame,group::String,ages::Vector{Int64})
     temp = df[df.age  .<= max_age , :]
     age_filtered_dataset = temp[temp.age .>= min_age,:]
 
-    stock_shr = age_filtered_dataset.stocks ./age_filtered_dataset[!,group]
-    bills_shr = age_filtered_dataset.bonds ./age_filtered_dataset[!,group]
+ stock_shr = replace(
+        assets_filtered_dataset.stocks ./ assets_filtered_dataset[!, group],
+        NaN => 0.0,             # 0 % stocks when the denominator is 0
+    )
+    bills_shr = replace(
+        assets_filtered_dataset.bonds  ./ assets_filtered_dataset[!, group],
+        NaN => 1.0,             # 100 % bonds when the denominator is 0
+    )
+    
     stock_participation = age_filtered_dataset.IFC_paid 
     real_est_shr = age_filtered_dataset.real_estate ./age_filtered_dataset[!,group]
     human_cap_shr = age_filtered_dataset.expected_earnings ./age_filtered_dataset[!,group]
     debt_shr = age_filtered_dataset.debt ./ age_filtered_dataset[!,group]
 
-    st = mean(stock_shr)
-    bi = mean(bills_shr)
-    re = mean(real_est_shr)
-    hc = mean(human_cap_shr)
+    st = mean(filter(!isnan, stock_shr))
+    bi = mean(filter(!isnan, bills_shr))
+    re = mean(filter(!isnan, real_est_shr))
+    hc = mean(filter(!isnan, human_cap_shr))
     part = mean(stock_participation)
-    dt = mean(debt_shr)
+    dt = mean(filter(!isnan, debt_shr))
 
     return vcat(st, bi , re , hc, part, dt)
 end 
@@ -113,8 +127,8 @@ colnames = [:liquid_30orless, :liquid_35to45, :liquid_50to60, :liquid_65plus,
                     :total_30orless, :total_35to45, :total_50to60, :total_65plus]
 
 out_5 = DataFrame(Table_5,colnames)
-CSV.write("Table_5_estimates_cubic.csv", out_5)
+CSV.write("Table_5_estimates_update_3_no_hrisk.csv", out_5)
 ####################
 # Check for overall stock market participation
 ####################
- mean(simulated_data.IFC_paid) # With cubic interpolation it was 63%
+ mean(simulated_data.IFC_paid) # With cubic interpolation it was 63%, linear was 67%, cubic with no h risk was 63%.

@@ -216,7 +216,7 @@ function worker_value(j::Int, ω_grid::Vector{Float64}, T_ω::Matrix{Float64}, n
 
     # Impose punishment continuation value for choices which 
     # imply outside-grid COH states. 
-    if X_prime_lb < X_min ||  S_and_B < 0
+    if X_prime_lb < X_min
         return  pun
     end
 

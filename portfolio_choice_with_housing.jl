@@ -4,12 +4,28 @@
 ###########################################
 # Packages 
 ###########################################
+using Pkg
+
+Pkg.add([
+    "Parameters",
+    "Interpolations",
+    "Optim",
+    "Plots",
+    "FastGaussQuadrature",
+    "LaTeXStrings",
+    "Distributions",
+    "CSV",
+    "Dierckx",
+    "StatsBase",
+    "DataFrames",
+])
+
 using Parameters, LinearAlgebra, Random, Interpolations, Optim, Plots, Statistics, FastGaussQuadrature
 using LaTeXStrings, Distributions, Serialization, DelimitedFiles,CSV
 using Dierckx, StatsBase, DataFrames
 
 # indir_parameters = "C:/Users/zacha/Documents/Research Ideas/Housing and Portfolio Choice/Replication/parameters"
-indir_parameters = "parameters"
+indir_parameters = "/home/z/zorlando/Replication/parameters"
 ###########################################
 # Parameters
 ###########################################
@@ -98,9 +114,9 @@ mat_clg  = sim_to_matrix(sim_clg)
 
 combined = vcat(mat_nhs, mat_hs, mat_clg)
 df = DataFrame(combined, cols)
-mean(df.IFC_paid)
+writedlm("SMP_F5K_update_6.csv", [mean(df.IFC_paid)])
 
-CSV.write("simulations_panel_update_5.csv", df)
+CSV.write("simulations_panel_F5K_update_6.csv", df)
 
 # Fixing η's path across simulations 
 mat_nhs_cons  = sim_to_matrix(sim_nhs_cons)
@@ -110,10 +126,11 @@ mat_clg_cons  = sim_to_matrix(sim_clg_cons)
 combined_cons = vcat(mat_nhs_cons, mat_hs_cons, mat_clg_cons)
 df_cons = DataFrame(combined_cons, cols)
 mean(df_cons.IFC_paid)
-CSV.write("simulations_panel_update_5.csv", df_cons)
+CSV.write("simulations_panel_F5K_update_6_cons.csv", df_cons)
 #########################################
 # Checks
 #########################################
+#=
 @unpack_Model_Parameters para 
 @unpack val_func, c_pol_func, H_pol_func, LTV_pol_func, FC_pol_func, α_pol_func, Move_pol_func, S_and_B_pol_func, κ, σ_ω = sols_nhs
 
@@ -124,11 +141,11 @@ age_grid = collect(range(start_age, length = 10, stop = end_age))
 
 
 # Value function across X
-plot(sols_nhs.val_func[:,1,1,2,19:nX,2]')
+plot(sols_nhs.val_func[1,1,1,1,4:nX,1])
 plot!(sols_nhs.val_func[2,1,1,10,:,10])
 
 # Consumption
-plot(X_grid[10:nX],sols_nhs.c_pol_func[1,1,1,2,10:nX,9], title = "Effect of SMP on Consumption/Saving is Het. in COH", label = "Unpaid, T = 10 H = 20K")
+plot(X_grid[10:nX],sols_nhs.c_pol_func[1,1,1,2,10:nX,9], title = "Effect of SMP on Consumption/Saving is Het. in COH", label = "Unpaid, T = 10 H = 5KK")
 plot!(X_grid[1:20],sols_nhs.c_pol_func[1,2,1,2,1:20,10], label = "Paid", xlabel = "COH")
 plot!(sols.c_pol_func[2,1,1,1,:,1])
 
@@ -144,18 +161,16 @@ plot(X_grid,Move_pol_func[:,1,1,2,:,2]')
 plot(X_grid, LTV_pol_func[1,1,1:3,8,:,2]')
 
 # Stock share
-plot(X_grid, sols_nhs.α_pol_func[1,1,2,2,:,2],title = "Impact of Housing on Portfolio Choice: T = 2", label = L"H = $20K", xlabel = L"COH ($)", ylabel = "Stock Share")
-plot!(X_grid[1:20], sols_nhs.α_pol_func[1,1,2,3,1:20,2], label = L"H = $36K")
-plot!(X_grid[1:20], sols_nhs.α_pol_func[1,1,2,,1:20,2], label = L"H = $135K")
+plot(X_grid[1:30], sols_nhs.α_pol_func[1,1,2,1,1:30,1],title = "Impact of Housing on Portfolio Choice: T = 2", label = L"H = $5KK", xlabel = L"COH ($)", ylabel = "Stock Share")
 
-savefig("Stock share policy function_F1K.png")
+savefig("Stock share policy function_F5K_update_6.png")
 # Stock market entry payment 
-plot(X_grid[1:30], FC_pol_func[1,1,1,1,1:30,1], xlabel = L"COH ($)") 
+plot(X_grid[1:30], X_grid[1:30] .- sols_nhs.c_pol_func[1,1,1,1,1:30,1] .- F * sols_nhs.FC_pol_func[1,1,1,1,1:30,1] .- sols_nhs.S_and_B_pol_func[1,1,1,1,1:30,1]  .- 0.94 .* sols_nhs.H_pol_func[1,1,1,1,1:30,1], xlabel = L"COH ($)") 
 plot!(X_grid[1:30], FC_pol_func[1,1,1,3,1:30,10], xlabel = L"COH ($)") 
 
 plot(X_grid[1:50], H_pol_func[1,1,1,2,1:50,2], xlabel = L"COH ($)") 
 plot!(X_grid[1:50], H_pol_func[1,1,1,2,1:50,8], xlabel = L"COH ($)") 
-
+=#
 ############################
 # Check simulation 
 ############################
@@ -193,65 +208,65 @@ income_path =  Dict(a => mean(df.income[df.age .== a]) for a in uage)
 # Consumption
 plot(consumption_path_mean, xlabel = "Period", ylabel = "Dollars", title = "Consumption by Age", label = "Mean")
 plot!(consumption_path_med, xlabel = "Period", ylabel = "Dollars", title = "Consumption by Age", label = "Median")
-savefig("Consumption_Path_update_5.png")
+savefig("Consumption_Path_F5K_update_6.png")
 
 # Cash on Hand
 plot(cash_on_hand_path, xlabel = "Period", ylabel = "Dollars", title = "Mean Cash by Age", label = "")
-savefig("Cash_Path_update_5.png")
+savefig("Cash_Path_F5K_update_6.png")
 
 # Wealth
 plot(wealth_path, xlabel = "Period", ylabel = "Dollars", title = "Mean Wealth by Age", label = "")
-savefig("Wealth_Path_update_5.png")
+savefig("Wealth_Path_F5K_update_6.png")
 
 # Stock Path
 plot(stock_path_mean, xlabel = "Period", ylabel = "Dollars", title = "Stocks by Age", label = "Mean")
 plot!(stock_path_med, xlabel = "Period", ylabel = "Dollars", label = "Median")
-savefig("Stock_Path_update_5.png")
+savefig("Stock_Path_F5K_update_6.png")
 
 # Bonds
 plot(bond_path, xlabel = "Period", ylabel = "Dollars", title = "Mean Bonds by Age", label = "")
-savefig("Bond_Path_update_5.png")
+savefig("Bond_Path_F5K_update_6.png")
 
 # Debt Path
 plot(debt_path_mean, xlabel = "Period", ylabel = "Dollars", title = "Debt by Age", label = "Mean")
 plot!(debt_path_med, xlabel = "Period", ylabel = "Dollars", title = "Debt by Age", label = "Median")
-savefig("Debt_Path_update_5.png")
+savefig("Debt_Path_F5K_update_6.png")
 
 # LTV Path
 plot(LTV_path, xlabel = "Period", ylabel = "Dollars", title = "Mean LTV Ratio by Age", label = "")
-savefig("LTV_Path_update_5.png")
+savefig("LTV_Path_F5K_update_6.png")
 
 # Housing Path
 plot(housing_path_mean, xlabel = "Period", ylabel = "Dollars", title = "Housing by Age", label = "Mean")
 plot!(housing_path_med, xlabel = "Period", ylabel = "Dollars", title = "Housing by Age", label = "Median")
 
-savefig("Housing_Path_update_5.png")
+savefig("Housing_Path_F5K_update_6.png")
 
 # Stock Market Entry Path
 plot(stock_market_entry_path, xlabel = "Period", ylabel = "Fraction", title = "Stock Market Participation by Age", label = "")
-savefig("SMP_update_5.png")
+savefig("SMP_F5K_update_6.png")
 
 # Proportion Moving
 plot(moved_path, xlabel = "Period", ylabel = "Fraction", title = "Proportion Moving by Age", label = "")
-savefig("Moving_Path_update_5.png")
+savefig("Moving_Path_F5K_update_6.png")
 
 # Income vs Consumption
 plot(income_path, xlabel = "Period", ylabel = "Dollars", title = "", label = "Mean Income")
 plot!(consumption_path_mean, xlabel = "Period", ylabel = "Dollars", label = "Mean Consumption")
-savefig("Income_Consumption_Path_update_5.png")
+savefig("Income_Consumption_Path_F5K_update_6.png")
 
 # Cash on hand histogram
 histogram(df.cash, xlabel = "Period", ylabel = "Dollars", title = "Cash Distribution", label = "")
-savefig("Cash_Histogram_update_5.png")
+savefig("Cash_Histogram_F5K_update_6.png")
 
 # Housing Histogram 
 histogram(df.housing, xlabel = "Period", ylabel = "Dollars", title = "Housing Distribution", label = "")
-savefig("Housing_Histogram_update_5.png")
+savefig("Housing_Histogram_F5K_update_6.png")
 
 # Stocks Histogram 
 histogram(df.stocks, xlabel = "Period", ylabel = "Dollars", title = "Stocks Distribution", label = "")
-savefig("Stocks_Histogram_update_5.png")
+savefig("Stocks_Histogram_F5K_update_6.png")
 
 # Consumption histogram 
 histogram(df.cons, xlabel = "Period", ylabel = "Dollars", title = "Consumption Distribution", label = "")
-savefig("Consumption_Histogram_update_5.png")
+savefig("Consumption_Histogram_F5K_update_6.png")
